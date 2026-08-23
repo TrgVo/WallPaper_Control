@@ -1,0 +1,37 @@
+# Build output
+.build/
+bin/
+obj/
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.tmp
+*.user
+
+# Runtime state and machine-specific configuration
+WallpaperControl.ini
+LivelyEnvironment.ini
+wallpaper-auto.disabled
+wallpaper-control.*.show
+lively-shuffle.pid
+shuffle-state.json
+shuffle.log
+*.log
+
+# Personal Lively data and media must never be committed
+Videos/
+SaveData/
+Library/
+NONE RTX DYANMIC VIBRANCE/
+RTX DYNAMIC VIBRANCE 50-100/
+RTX DYNAMIC VIBRANCE 70-100/
+RTX DYNAMIC VIBRANCE 100-100/
+*.mp4
+*.mkv
+*.webm
+
+# Local/experimental binaries
+*.exe
+!dist/WallpaperControlSetup.exe
+NvidiaAIDVCController.*
