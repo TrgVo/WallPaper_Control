@@ -175,7 +175,7 @@ internal static class PortableInstaller
         if (!File.Exists(settings))
         {
             File.WriteAllText(settings,
-                "[Wallpaper]\r\nAutoEnabled=0\r\n\r\n[Color]\r\nMode=Off\r\nIntensity=50\r\nSaturation=100\r\n\r\n[Safety]\r\nNvidiaDynamicVibrance=Off\r\n",
+                "[Wallpaper]\r\nAutoEnabled=0\r\n\r\n[Color]\r\nMode=Off\r\nIntensity=50\r\nSaturation=100\r\n\r\n[Safety]\r\nDriverPolicy=Unchanged\r\n",
                 new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(automation, "wallpaper-auto.disabled"), "Disabled after first install\r\n", new UTF8Encoding(false));
         }

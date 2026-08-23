@@ -33,7 +33,7 @@ Video đã đăng ký trong Lively được đọc từ `LivelyInfo.json` và s�
 
 ## Màu và NVIDIA
 
-- NVIDIA RTX Dynamic Vibrance của driver không được bật bởi ứng dụng.
+- Ứng dụng không ghi, bật hoặc tắt trạng thái NVIDIA; game và NVIDIA App tự quản lý RTX Dynamic Vibrance/Game Filter.
 - Color Boost dùng thuộc tính saturation của tiến trình MPV, nên chỉ thay đổi video hình nền.
 - Các mức phân loại vẫn là Intensity `50 / 70 / 100`, Saturation cơ sở `100`.
 - Thiết lập mặc định sau lần cài đầu: Auto Wallpaper **Off**, Color Boost **Off**.

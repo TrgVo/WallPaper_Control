@@ -4,7 +4,6 @@ $ErrorActionPreference = 'Stop'
 $automationRoot = $PSScriptRoot
 $settingsPath = Join-Path $automationRoot 'WallpaperControl.ini'
 $statePath = Join-Path $automationRoot 'shuffle-state.json'
-$controllerPath = Join-Path $automationRoot 'NvidiaAIDVCController.exe'
 
 function Resolve-LivelyEnvironment {
     $configuredSettings = $null
@@ -134,20 +133,9 @@ $filter = switch ($settings.Mode) {
     default { [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100 } }
 }
 
-# Driver-level RTX Dynamic Vibrance is deliberately locked off. NVIDIA applies
-# it to the display output, so a per-process profile can still recolor games.
-$processes = @(Get-Process -Name 'mpv' -ErrorAction SilentlyContinue | Where-Object {
-    $_.Path -and $_.Path.IndexOf('LivelyWallpaper', [StringComparison]::OrdinalIgnoreCase) -ge 0
-})
-if (Test-Path -LiteralPath $controllerPath) {
-    foreach ($process in $processes) {
-        try { & $controllerPath --set-persistent $process.Id 0 50 100 | Out-Null } catch { }
-    }
-}
-
 $boost = Get-MpvSaturationBoost $filter
 $updatedPipes = Set-MpvWallpaperColor $boost
 
 if (-not $Silent) {
-    "Mode=$($settings.Mode) Intensity=$($filter.Intensity) Saturation=100 MpvBoost=+$boost Nvidia=Off Pipes=$updatedPipes"
+    "Mode=$($settings.Mode) Intensity=$($filter.Intensity) Saturation=100 MpvBoost=+$boost Nvidia=Unchanged Pipes=$updatedPipes"
 }

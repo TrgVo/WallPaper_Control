@@ -433,7 +433,7 @@ internal sealed class WallpaperControlForm : Form
 
         var lockPanel = new Panel { Location = new Point(18, 440), Size = new Size(182, 72), BackColor = Color.FromArgb(17, 22, 28) };
         lockPanel.Controls.Add(MakeLabel("NVIDIA DRIVER", 14, 10, 150, 18, Theme.Muted, 8F, FontStyle.Bold));
-        lockPanel.Controls.Add(MakeLabel("●  LOCKED OFF", 14, 33, 150, 23, Theme.Green, 9.5F, FontStyle.Bold));
+        lockPanel.Controls.Add(MakeLabel("●  USER CONTROLLED", 14, 33, 160, 23, Theme.Green, 8.5F, FontStyle.Bold));
         sidebar.Controls.Add(lockPanel);
         sidebar.Controls.Add(MakeLabel("v2.0  ·  GAMING EDITION", 31, 526, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
         Controls.Add(sidebar);
@@ -507,7 +507,7 @@ internal sealed class WallpaperControlForm : Form
         colorState.ForeColor = Theme.Text;
         colorState.Font = new Font("Segoe UI Semibold", 9F);
         colorCard.Controls.Add(colorState);
-        var safetyLine = MakeLabel("NVIDIA RTX Dynamic Vibrance luôn tắt · màu chỉ áp dụng cho video MPV, không ảnh hưởng game/app", 24, 187, 634, 25, Theme.Muted, 8.5F, FontStyle.Regular);
+        var safetyLine = MakeLabel("Wallpaper Control không thay đổi NVIDIA · game và NVIDIA App tự quản lý filter", 24, 187, 634, 25, Theme.Muted, 8.5F, FontStyle.Regular);
         safetyLine.BackColor = Color.FromArgb(17, 22, 30);
         safetyLine.TextAlign = ContentAlignment.MiddleCenter;
         colorCard.Controls.Add(safetyLine);
@@ -532,7 +532,7 @@ internal sealed class WallpaperControlForm : Form
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Thoát ứng dụng", null, delegate { exitRequested = true; Close(); });
         trayIcon.Icon = LoadAppIcon();
-        trayIcon.Text = "Wallpaper Control · NVIDIA Off";
+        trayIcon.Text = "Wallpaper Control · MPV color only";
         trayIcon.ContextMenuStrip = menu;
         trayIcon.Visible = true;
         trayIcon.DoubleClick += delegate { ShowFromTray(); };
@@ -699,7 +699,7 @@ internal sealed class WallpaperControlForm : Form
         string text = "[Wallpaper]\r\nAutoEnabled=" + (value.AutoEnabled ? "1" : "0") +
                       "\r\n\r\n[Color]\r\nMode=" + value.ColorMode +
                       "\r\nIntensity=" + Math.Max(0, Math.Min(100, value.Intensity)) +
-                      "\r\nSaturation=100\r\n\r\n[Safety]\r\nNvidiaDynamicVibrance=Off\r\n";
+                      "\r\nSaturation=100\r\n\r\n[Safety]\r\nDriverPolicy=Unchanged\r\n";
         File.WriteAllText(SettingsPath, text, new UTF8Encoding(false));
     }
 
@@ -707,7 +707,7 @@ internal sealed class WallpaperControlForm : Form
     {
         if (value.ColorMode == "Manual") return "Thủ công " + value.Intensity + "/100 · Saturation 100 · MPV only";
         if (value.ColorMode == "PerFolder") return "Theo thư mục 50/70/100 · Saturation 100 · MPV only";
-        return "Tắt tăng màu · NVIDIA driver vẫn khóa Off";
+        return "Tắt tăng màu MPV · NVIDIA không bị thay đổi";
     }
 
     private static void StopShuffle()

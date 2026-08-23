@@ -75,8 +75,6 @@ function Resolve-LivelyEnvironment {
 
 $livelyEnvironment = Resolve-LivelyEnvironment
 $libraryRoot = Join-Path $livelyEnvironment.WallpaperRoot 'SaveData\wptmp'
-$nvidiaControllerPath = Join-Path $automationRoot 'NvidiaAIDVCController.exe'
-$nvidiaDynamicVibranceEnabled = $false
 $controlSettingsPath = Join-Path $automationRoot 'WallpaperControl.ini'
 $disabledMarkerPath = Join-Path $automationRoot 'wallpaper-auto.disabled'
 $servicePidPath = Join-Path $automationRoot 'lively-shuffle.pid'
@@ -554,70 +552,27 @@ function Set-RunningBrightness([int]$value) {
     Invoke-LivelyArguments ('setprop --property "brightness=' + $value + '"')
 }
 
-function Set-NvidiaDynamicVibrance($filter, [int]$processRetryCount = 1) {
-    if (-not (Test-Path -LiteralPath $nvidiaControllerPath)) {
-        Write-Log "NVIDIA controller is missing: $nvidiaControllerPath"
-        return $false
-    }
-
-    $livelyMpvProcesses = @()
-    for ($attempt = 1; $attempt -le [Math]::Max(1, $processRetryCount); $attempt++) {
-        $livelyMpvProcesses = @(Get-Process -Name 'mpv' -ErrorAction SilentlyContinue | Where-Object {
-            $_.Path -and $_.Path.IndexOf('LivelyWallpaper', [StringComparison]::OrdinalIgnoreCase) -ge 0
-        })
-        if ($livelyMpvProcesses.Count -gt 0) { break }
-        if ($attempt -lt $processRetryCount) { Start-Sleep -Milliseconds 250 }
-    }
-
-    if ($livelyMpvProcesses.Count -eq 0) {
-        Write-Log 'No Lively MPV process was found for NVIDIA RTX Dynamic Vibrance.'
-        return $false
-    }
-
-    $successCount = 0
-    foreach ($process in $livelyMpvProcesses) {
-        # RTX Dynamic Vibrance is a display-output effect even when NVIDIA
-        # exposes a process profile. Never enable it from this service.
-        $controllerOutput = & $nvidiaControllerPath --set-persistent $process.Id 0 50 100 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) {
-            $successCount++
-        }
-        else {
-            Write-Log "NVIDIA RTX Dynamic Vibrance failed for MPV $($process.Id): $($controllerOutput.Trim())"
-        }
-    }
-
-    if ($successCount -eq 0) { return $false }
-    Write-Log "NVIDIA RTX Dynamic Vibrance is locked Off for $successCount MPV process(es)."
-    return $true
-}
-
 $script:dvcSuppressedByForeground = $false
 
-function Update-ForegroundDvcSafety($activeFilter) {
-    if (-not $nvidiaDynamicVibranceEnabled) { return $true }
+function Update-ForegroundSafety($activeFilter) {
     $context = Get-ForegroundWindowContext
     if (Test-IsDesktopForeground $context) {
-        if ($script:dvcSuppressedByForeground -and $activeFilter) {
-            [void](Set-NvidiaDynamicVibrance $activeFilter)
-            Write-Log "Desktop returned to foreground; wallpaper RTX Dynamic Vibrance restored ($($activeFilter.FilterLabel))."
+        if ($script:dvcSuppressedByForeground) {
+            Write-Log 'Desktop returned to foreground; wallpaper shuffle resumed. NVIDIA state is untouched.'
             $script:dvcSuppressedByForeground = $false
         }
         return $true
     }
 
     if (-not $script:dvcSuppressedByForeground) {
-        if ($nvidiaDynamicVibranceEnabled) {
-            [void](Set-NvidiaDynamicVibrance $nvidiaFilterOff)
-        }
-        Write-Log "Foreground app detected ($($context.ProcessName), $($context.ClassName)); wallpaper RTX Dynamic Vibrance disabled and shuffle paused."
+        Write-Log "Foreground app detected ($($context.ProcessName), $($context.ClassName)); wallpaper shuffle paused. NVIDIA state is untouched."
         $script:dvcSuppressedByForeground = $true
     }
     return $false
 }
 
 function Wait-ForDesktopForeground($activeFilter) {
-    while (-not (Update-ForegroundDvcSafety $activeFilter)) {
+    while (-not (Update-ForegroundSafety $activeFilter)) {
         Start-Sleep -Milliseconds $foregroundPollMilliseconds
     }
 }
@@ -689,7 +644,7 @@ function Set-MpvWallpaperColor($connections, $filter, [bool]$writeLog = $true) {
     $boost = Get-MpvSaturationBoost $filter
     Send-MpvCommand $connections @('set_property', 'saturation', $boost)
     if ($writeLog) {
-        Write-Log "MPV wallpaper-only color boost: Intensity $($filter.Intensity)/100, Saturation baseline 100, MPV +$boost. NVIDIA remains Off."
+        Write-Log "MPV wallpaper-only color boost: Intensity $($filter.Intensity)/100, Saturation baseline 100, MPV +$boost. NVIDIA state is untouched."
     }
 }
 
@@ -868,9 +823,7 @@ try {
     }
     [IO.File]::WriteAllText($servicePidPath, [string]$PID, (New-Object Text.UTF8Encoding($false)))
     Write-Log 'Shuffle service started.'
-    $script:nvidiaDynamicVibranceEnabled = $false
-    [void](Set-NvidiaDynamicVibrance $nvidiaFilterOff)
-    Write-Log 'NVIDIA RTX Dynamic Vibrance is locked Off; MPV wallpaper-only color is active.'
+    Write-Log 'MPV wallpaper-only color is active. NVIDIA driver state is user-controlled and untouched.'
     $activeVideoFilter = $null
     $lastNvidiaSignature = ''
     :serviceLoop while ($true) {
@@ -880,7 +833,6 @@ try {
         }
         $controlSettings = Get-WallpaperControlSettings
         if (-not $controlSettings.AutoEnabled) { break }
-        $script:nvidiaDynamicVibranceEnabled = $false
         Wait-ForDesktopForeground $activeVideoFilter
         $installed = Import-NewVideos
         $classifiedVideos = @(Get-ClassifiedVideos)
@@ -916,9 +868,6 @@ try {
             try {
                 Set-LivelyWallpaper $packagePath
                 Start-Sleep -Milliseconds 900
-                if ($nvidiaDynamicVibranceEnabled) {
-                    [void](Set-NvidiaDynamicVibrance $nvidiaFilterOff 6)
-                }
                 Set-RunningBrightness -100
                 Start-Sleep -Milliseconds 150
                 Invoke-FadeIn $effectiveFilter
@@ -945,15 +894,13 @@ try {
             $latestFilter = Get-EffectiveNvidiaFilter $video $latestControlSettings
             $latestSignature = "$($latestControlSettings.NvidiaMode)|$($latestFilter.FilterEnabled)|$($latestFilter.Intensity)|$($latestFilter.Saturation)"
             if ($latestSignature -ne $lastNvidiaSignature) {
-                $script:nvidiaDynamicVibranceEnabled = $false
                 $activeVideoFilter = $latestFilter
-                [void](Set-NvidiaDynamicVibrance $nvidiaFilterOff)
                 $script:dvcSuppressedByForeground = $false
                 [void](Set-RunningMpvWallpaperColor $activeVideoFilter)
-                Write-Log "Wallpaper Control changed safe MPV color mode to $($latestControlSettings.NvidiaMode). NVIDIA remains Off."
+                Write-Log "Wallpaper Control changed MPV-only color mode to $($latestControlSettings.NvidiaMode). NVIDIA state is untouched."
                 $lastNvidiaSignature = $latestSignature
             }
-            $desktopIsForeground = Update-ForegroundDvcSafety $activeVideoFilter
+            $desktopIsForeground = Update-ForegroundSafety $activeVideoFilter
             $sleepForMilliseconds = [int][Math]::Min($foregroundPollMilliseconds, ($remainingSlotMilliseconds - $activeElapsedMilliseconds))
             Start-Sleep -Milliseconds $sleepForMilliseconds
             if ($desktopIsForeground) {
@@ -972,7 +919,6 @@ catch {
     throw
 }
 finally {
-    try { [void](Set-NvidiaDynamicVibrance $nvidiaFilterOff) } catch { }
     try { if (Test-Path -LiteralPath $servicePidPath) { Remove-Item -LiteralPath $servicePidPath -Force } } catch { }
     Write-Log 'Shuffle service stopped.'
     $mutex.ReleaseMutex()
