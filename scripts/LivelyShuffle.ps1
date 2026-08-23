@@ -75,6 +75,7 @@ function Resolve-LivelyEnvironment {
 
 $livelyEnvironment = Resolve-LivelyEnvironment
 $libraryRoot = Join-Path $livelyEnvironment.WallpaperRoot 'SaveData\wptmp'
+$canonicalVideoRoot = Join-Path $livelyEnvironment.WallpaperRoot 'Videos'
 $controlSettingsPath = Join-Path $automationRoot 'WallpaperControl.ini'
 $disabledMarkerPath = Join-Path $automationRoot 'wallpaper-auto.disabled'
 $servicePidPath = Join-Path $automationRoot 'lively-shuffle.pid'
@@ -84,7 +85,7 @@ $classifiedVideoGroups = @(
     [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'RTX DYNAMIC VIBRANCE 70-100'); Enabled = $true; Intensity = 70; Saturation = 100; Label = '70/100' }
     [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'RTX DYNAMIC VIBRANCE 100-100'); Enabled = $true; Intensity = 100; Saturation = 100; Label = '100/100' }
 )
-$nvidiaFilterOff = [pscustomobject]@{ FilterEnabled = $false; Intensity = 50; Saturation = 100; FilterLabel = 'Off' }
+$nvidiaFilterOff = [pscustomobject]@{ FilterEnabled = $false; Intensity = 50; Saturation = 100; FilterLabel = 'Off'; MpvBoost = 0 }
 $statePath = Join-Path $automationRoot 'shuffle-state.json'
 $logPath = Join-Path $automationRoot 'shuffle.log'
 $livelySettingsPath = $livelyEnvironment.SettingsPath
@@ -151,11 +152,20 @@ function Get-WallpaperControlSettings {
     $saturationText = [string]$values['color.saturation']
     if (-not $saturationText) { $saturationText = [string]$values['nvidia.saturation'] }
     if ($saturationText) { [void][int]::TryParse($saturationText, [ref]$saturation) }
+    $folderBoost50 = 35
+    $folderBoost70 = 55
+    $folderBoost100 = 80
+    [void][int]::TryParse([string]$values['foldertuning.boost50'], [ref]$folderBoost50)
+    [void][int]::TryParse([string]$values['foldertuning.boost70'], [ref]$folderBoost70)
+    [void][int]::TryParse([string]$values['foldertuning.boost100'], [ref]$folderBoost100)
     return [pscustomobject]@{
         AutoEnabled = [string]$values['wallpaper.autoenabled'] -ne '0'
         NvidiaMode = $mode
         Intensity = [Math]::Max(0, [Math]::Min(100, $intensity))
         Saturation = [Math]::Max(0, [Math]::Min(100, $saturation))
+        FolderBoost50 = [Math]::Max(0, [Math]::Min(100, $folderBoost50))
+        FolderBoost70 = [Math]::Max(0, [Math]::Min(100, $folderBoost70))
+        FolderBoost100 = [Math]::Max(0, [Math]::Min(100, $folderBoost100))
     }
 }
 
@@ -167,30 +177,49 @@ function Get-EffectiveNvidiaFilter($video, $controlSettings) {
                 Intensity = [int]$controlSettings.Intensity
                 Saturation = [int]$controlSettings.Saturation
                 FilterLabel = "Manual $($controlSettings.Intensity)/$($controlSettings.Saturation)"
+                MpvBoost = [int][Math]::Round([Math]::Max(0, [Math]::Min(100, [int]$controlSettings.Intensity)) * 0.8)
             }
         }
-        'PerFolder' { return $video }
+        'PerFolder' {
+            $boost = switch ([int]$video.Intensity) {
+                50 { [int]$controlSettings.FolderBoost50; break }
+                70 { [int]$controlSettings.FolderBoost70; break }
+                100 { [int]$controlSettings.FolderBoost100; break }
+                default { 0 }
+            }
+            if (-not $video.FilterEnabled) { $boost = 0 }
+            return [pscustomobject]@{
+                FilterEnabled = [bool]$video.FilterEnabled
+                Intensity = [int]$video.Intensity
+                Saturation = 100
+                FilterLabel = [string]$video.FilterLabel
+                MpvBoost = [Math]::Max(0, [Math]::Min(100, $boost))
+            }
+        }
         default { return $nvidiaFilterOff }
     }
 }
 
 function Get-ClassifiedVideos {
     $knownNames = @{}
-    foreach ($group in $classifiedVideoGroups) {
-        if (-not (Test-Path -LiteralPath $group.Path)) {
-            Write-Log "Classified video folder is missing: $($group.Path)"
-            continue
-        }
-        foreach ($video in Get-ChildItem -LiteralPath $group.Path -Filter '*.mp4' -File | Sort-Object Name) {
+    if (Test-Path -LiteralPath $canonicalVideoRoot) {
+        foreach ($video in Get-ChildItem -LiteralPath $canonicalVideoRoot -Filter '*.mp4' -File | Sort-Object Name) {
+            $matches = @($classifiedVideoGroups | Where-Object {
+                Test-Path -LiteralPath (Join-Path $_.Path $video.Name) -PathType Leaf
+            })
+            if ($matches.Count -gt 1) {
+                Write-Log "Video is present in multiple classification folders; using the first match: $($video.Name)"
+            }
+            $group = if ($matches.Count -gt 0) { $matches[0] } else { $null }
             $knownNames[$video.Name.ToLowerInvariant()] = $true
             [pscustomobject]@{
                 Name = $video.Name
                 BaseName = $video.BaseName
                 FullName = $video.FullName
-                FilterEnabled = [bool]$group.Enabled
-                Intensity = [int]$group.Intensity
-                Saturation = [int]$group.Saturation
-                FilterLabel = [string]$group.Label
+                FilterEnabled = [bool]($group -and $group.Enabled)
+                Intensity = if ($group) { [int]$group.Intensity } else { 50 }
+                Saturation = 100
+                FilterLabel = if ($group) { [string]$group.Label } else { 'Videos / Unclassified / Off' }
             }
         }
     }
@@ -635,16 +664,16 @@ function Send-MpvCommand($connections, [object[]]$command) {
 
 function Get-MpvSaturationBoost($filter) {
     if (-not $filter -or -not $filter.FilterEnabled) { return 0 }
-    # Preserve the user's classified Intensity 50/70/100. MPV's neutral point
-    # is 0, so these map to a comfortable local-only boost of +18/+25/+35.
-    return [int][Math]::Round(([Math]::Max(0, [Math]::Min(100, [int]$filter.Intensity))) * 0.35)
+    # Saturation remains 100 at the classification layer. MpvBoost is the
+    # independently tunable MPV output for each hard-link folder.
+    return [Math]::Max(0, [Math]::Min(100, [int]$filter.MpvBoost))
 }
 
 function Set-MpvWallpaperColor($connections, $filter, [bool]$writeLog = $true) {
     $boost = Get-MpvSaturationBoost $filter
     Send-MpvCommand $connections @('set_property', 'saturation', $boost)
     if ($writeLog) {
-        Write-Log "MPV wallpaper-only color boost: Intensity $($filter.Intensity)/100, Saturation baseline 100, MPV +$boost. NVIDIA state is untouched."
+        Write-Log "MPV wallpaper-only color boost: classified Intensity $($filter.Intensity)/100, Saturation baseline 100, tuned MPV +$boost. NVIDIA state is untouched."
     }
 }
 
@@ -825,7 +854,7 @@ try {
     Write-Log 'Shuffle service started.'
     Write-Log 'MPV wallpaper-only color is active. NVIDIA driver state is user-controlled and untouched.'
     $activeVideoFilter = $null
-    $lastNvidiaSignature = ''
+    $lastColorSignature = ''
     :serviceLoop while ($true) {
         if (Test-Path -LiteralPath $disabledMarkerPath) {
             Write-Log 'Wallpaper Control switched Auto Wallpaper off; stopping shuffle service.'
@@ -855,7 +884,7 @@ try {
         $name = $selection.Name
         $video = $videoByName[$name.ToLowerInvariant()]
         $effectiveFilter = Get-EffectiveNvidiaFilter $video $controlSettings
-        $lastNvidiaSignature = "$($controlSettings.NvidiaMode)|$($effectiveFilter.FilterEnabled)|$($effectiveFilter.Intensity)|$($effectiveFilter.Saturation)"
+        $lastColorSignature = "$($controlSettings.NvidiaMode)|$($effectiveFilter.FilterEnabled)|$($effectiveFilter.Intensity)|$($effectiveFilter.Saturation)|$($effectiveFilter.MpvBoost)"
         $packagePath = $installed[$name.ToLowerInvariant()]
         $videoPath = $video.FullName
         $slotClock = [Diagnostics.Stopwatch]::StartNew()
@@ -892,13 +921,13 @@ try {
             $latestControlSettings = Get-WallpaperControlSettings
             if (-not $latestControlSettings.AutoEnabled) { break serviceLoop }
             $latestFilter = Get-EffectiveNvidiaFilter $video $latestControlSettings
-            $latestSignature = "$($latestControlSettings.NvidiaMode)|$($latestFilter.FilterEnabled)|$($latestFilter.Intensity)|$($latestFilter.Saturation)"
-            if ($latestSignature -ne $lastNvidiaSignature) {
+            $latestSignature = "$($latestControlSettings.NvidiaMode)|$($latestFilter.FilterEnabled)|$($latestFilter.Intensity)|$($latestFilter.Saturation)|$($latestFilter.MpvBoost)"
+            if ($latestSignature -ne $lastColorSignature) {
                 $activeVideoFilter = $latestFilter
                 $script:dvcSuppressedByForeground = $false
                 [void](Set-RunningMpvWallpaperColor $activeVideoFilter)
                 Write-Log "Wallpaper Control changed MPV-only color mode to $($latestControlSettings.NvidiaMode). NVIDIA state is untouched."
-                $lastNvidiaSignature = $latestSignature
+                $lastColorSignature = $latestSignature
             }
             $desktopIsForeground = Update-ForegroundSafety $activeVideoFilter
             $sleepForMilliseconds = [int][Math]::Min($foregroundPollMilliseconds, ($remainingSlotMilliseconds - $activeElapsedMilliseconds))

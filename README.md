@@ -36,6 +36,8 @@ Video đã đăng ký trong Lively được đọc từ `LivelyInfo.json` và s�
 - Ứng dụng không ghi, bật hoặc tắt trạng thái NVIDIA; game và NVIDIA App tự quản lý RTX Dynamic Vibrance/Game Filter.
 - Color Boost dùng thuộc tính saturation của tiến trình MPV, nên chỉ thay đổi video hình nền.
 - Các mức phân loại vẫn là Intensity `50 / 70 / 100`, Saturation cơ sở `100`.
+- Video luôn được phát từ thư mục `Videos`; bốn thư mục phân loại hard-link chỉ được dùng làm nhãn màu.
+- Chế độ theo thư mục cho phép chỉnh độc lập đầu ra MPV của ba nhóm, mặc định `+35 / +55 / +80`.
 - Thiết lập mặc định sau lần cài đầu: Auto Wallpaper **Off**, Color Boost **Off**.
 
 ## Thư mục phân loại

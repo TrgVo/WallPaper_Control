@@ -64,10 +64,19 @@ function Read-Settings {
     if (-not $intensityText) { $intensityText = [string]$values['nvidia.intensity'] }
     $intensity = 50
     [void][int]::TryParse($intensityText, [ref]$intensity)
+    $folderBoost50 = 35
+    $folderBoost70 = 55
+    $folderBoost100 = 80
+    [void][int]::TryParse([string]$values['foldertuning.boost50'], [ref]$folderBoost50)
+    [void][int]::TryParse([string]$values['foldertuning.boost70'], [ref]$folderBoost70)
+    [void][int]::TryParse([string]$values['foldertuning.boost100'], [ref]$folderBoost100)
     return [pscustomobject]@{
         Mode = $mode
         Intensity = [Math]::Max(0, [Math]::Min(100, $intensity))
         Saturation = 100
+        FolderBoost50 = [Math]::Max(0, [Math]::Min(100, $folderBoost50))
+        FolderBoost70 = [Math]::Max(0, [Math]::Min(100, $folderBoost70))
+        FolderBoost100 = [Math]::Max(0, [Math]::Min(100, $folderBoost100))
     }
 }
 
@@ -76,28 +85,26 @@ function Get-PerFolderFilter {
     if (Test-Path -LiteralPath $statePath) {
         try { $name = [string](Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).Current } catch { }
     }
-    if (-not $name) { return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100 } }
+    if (-not $name) { return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100; Boost = 0 } }
 
-    if (-not $wallpaperRoot) { return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100 } }
+    if (-not $wallpaperRoot) { return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100; Boost = 0 } }
     $groups = @(
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'NONE RTX DYANMIC VIBRANCE'); Enabled = 0; Intensity = 50 }
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 50-100'); Enabled = 1; Intensity = 50 }
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 70-100'); Enabled = 1; Intensity = 70 }
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 100-100'); Enabled = 1; Intensity = 100 }
+        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'NONE RTX DYANMIC VIBRANCE'); Enabled = 0; Intensity = 50; Boost = 0 }
+        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 50-100'); Enabled = 1; Intensity = 50; Boost = $settings.FolderBoost50 }
+        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 70-100'); Enabled = 1; Intensity = 70; Boost = $settings.FolderBoost70 }
+        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 100-100'); Enabled = 1; Intensity = 100; Boost = $settings.FolderBoost100 }
     )
     foreach ($group in $groups) {
         if (Test-Path -LiteralPath (Join-Path $group.Path $name)) {
-            return [pscustomobject]@{ Enabled = $group.Enabled; Intensity = $group.Intensity; Saturation = 100 }
+            return [pscustomobject]@{ Enabled = $group.Enabled; Intensity = $group.Intensity; Saturation = 100; Boost = $group.Boost }
         }
     }
-    return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100 }
+    return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100; Boost = 0 }
 }
 
 function Get-MpvSaturationBoost($filter) {
     if (-not $filter.Enabled) { return 0 }
-    # MPV uses -100..100 around its neutral point. Keep the user's classified
-    # Intensity 50/70/100 while mapping it to a comfortable process-local boost.
-    return [int][Math]::Round(([Math]::Max(0, [Math]::Min(100, $filter.Intensity))) * 0.35)
+    return [Math]::Max(0, [Math]::Min(100, [int]$filter.Boost))
 }
 
 function Set-MpvWallpaperColor([int]$boost) {
@@ -128,7 +135,7 @@ function Set-MpvWallpaperColor([int]$boost) {
 
 $settings = Read-Settings
 $filter = switch ($settings.Mode) {
-    'Manual' { [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = 100 }; break }
+    'Manual' { [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = 100; Boost = [int][Math]::Round($settings.Intensity * 0.8) }; break }
     'PerFolder' { Get-PerFolderFilter; break }
     default { [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100 } }
 }
