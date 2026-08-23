@@ -79,12 +79,6 @@ $canonicalVideoRoot = Join-Path $livelyEnvironment.WallpaperRoot 'Videos'
 $controlSettingsPath = Join-Path $automationRoot 'WallpaperControl.ini'
 $disabledMarkerPath = Join-Path $automationRoot 'wallpaper-auto.disabled'
 $servicePidPath = Join-Path $automationRoot 'lively-shuffle.pid'
-$classifiedVideoGroups = @(
-    [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'NONE RTX DYANMIC VIBRANCE'); Enabled = $false; Intensity = 50; Saturation = 100; Label = 'Off' }
-    [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'RTX DYNAMIC VIBRANCE 50-100'); Enabled = $true; Intensity = 50; Saturation = 100; Label = '50/100' }
-    [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'RTX DYNAMIC VIBRANCE 70-100'); Enabled = $true; Intensity = 70; Saturation = 100; Label = '70/100' }
-    [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'RTX DYNAMIC VIBRANCE 100-100'); Enabled = $true; Intensity = 100; Saturation = 100; Label = '100/100' }
-)
 $nvidiaFilterOff = [pscustomobject]@{ FilterEnabled = $false; Intensity = 50; Saturation = 100; FilterLabel = 'Off'; MpvBoost = 0 }
 $statePath = Join-Path $automationRoot 'shuffle-state.json'
 $logPath = Join-Path $automationRoot 'shuffle.log'
@@ -143,7 +137,8 @@ function Get-WallpaperControlSettings {
 
     $mode = [string]$values['color.mode']
     if (-not $mode) { $mode = [string]$values['nvidia.mode'] }
-    if ($mode -notin @('Off', 'PerFolder', 'Manual')) { $mode = 'Off' }
+    if ($mode -eq 'PerFolder') { $mode = 'Manual' }
+    if ($mode -notin @('Off', 'Manual')) { $mode = 'Off' }
     $intensity = 50
     $saturation = 100
     $intensityText = [string]$values['color.intensity']
@@ -152,48 +147,54 @@ function Get-WallpaperControlSettings {
     $saturationText = [string]$values['color.saturation']
     if (-not $saturationText) { $saturationText = [string]$values['nvidia.saturation'] }
     if ($saturationText) { [void][int]::TryParse($saturationText, [ref]$saturation) }
-    $folderBoost50 = 35
-    $folderBoost70 = 55
-    $folderBoost100 = 80
-    [void][int]::TryParse([string]$values['foldertuning.boost50'], [ref]$folderBoost50)
-    [void][int]::TryParse([string]$values['foldertuning.boost70'], [ref]$folderBoost70)
-    [void][int]::TryParse([string]$values['foldertuning.boost100'], [ref]$folderBoost100)
     return [pscustomobject]@{
         AutoEnabled = [string]$values['wallpaper.autoenabled'] -ne '0'
         NvidiaMode = $mode
         Intensity = [Math]::Max(0, [Math]::Min(100, $intensity))
         Saturation = [Math]::Max(0, [Math]::Min(100, $saturation))
-        FolderBoost50 = [Math]::Max(0, [Math]::Min(100, $folderBoost50))
-        FolderBoost70 = [Math]::Max(0, [Math]::Min(100, $folderBoost70))
-        FolderBoost100 = [Math]::Max(0, [Math]::Min(100, $folderBoost100))
     }
+}
+
+function Get-MpvBoost([int]$intensity, [int]$saturation) {
+    $safeIntensity = [Math]::Max(0, [Math]::Min(100, $intensity))
+    $safeSaturation = [Math]::Max(0, [Math]::Min(100, $saturation))
+    return [int][Math]::Round($safeIntensity * 0.8 * ($safeSaturation / 100.0))
+}
+
+function Get-DynamicProfileGroups {
+    $groups = @(
+        [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'NONE RTX DYANMIC VIBRANCE'); Enabled = $false; Intensity = 0; Saturation = 100; Label = 'Off'; IsProfile = $true }
+        [pscustomobject]@{ Path = (Join-Path $livelyEnvironment.WallpaperRoot 'NONE RTX DYNAMIC VIBRANCE'); Enabled = $false; Intensity = 0; Saturation = 100; Label = 'Off'; IsProfile = $true }
+    )
+    foreach ($directory in Get-ChildItem -LiteralPath $livelyEnvironment.WallpaperRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name) {
+        if ($directory.Name -notmatch '^RTX DYNAMIC VIBRANCE (\d{1,3})-(\d{1,3})$') { continue }
+        $intensity = [Math]::Max(0, [Math]::Min(100, [int]$matches[1]))
+        $saturation = [Math]::Max(0, [Math]::Min(100, [int]$matches[2]))
+        $groups += [pscustomobject]@{
+            Path = $directory.FullName
+            Enabled = $true
+            Intensity = $intensity
+            Saturation = $saturation
+            Label = "$intensity/$saturation"
+            IsProfile = $true
+        }
+    }
+    return @($groups)
 }
 
 function Get-EffectiveNvidiaFilter($video, $controlSettings) {
     switch ($controlSettings.NvidiaMode) {
         'Manual' {
+            $useProfile = [bool]$video.IsProfile
+            $enabled = if ($useProfile) { [bool]$video.FilterEnabled } else { $true }
+            $intensity = if ($useProfile) { [int]$video.Intensity } else { [int]$controlSettings.Intensity }
+            $saturation = if ($useProfile) { [int]$video.Saturation } else { [int]$controlSettings.Saturation }
             return [pscustomobject]@{
-                FilterEnabled = $true
-                Intensity = [int]$controlSettings.Intensity
-                Saturation = [int]$controlSettings.Saturation
-                FilterLabel = "Manual $($controlSettings.Intensity)/$($controlSettings.Saturation)"
-                MpvBoost = [int][Math]::Round([Math]::Max(0, [Math]::Min(100, [int]$controlSettings.Intensity)) * 0.8)
-            }
-        }
-        'PerFolder' {
-            $boost = switch ([int]$video.Intensity) {
-                50 { [int]$controlSettings.FolderBoost50; break }
-                70 { [int]$controlSettings.FolderBoost70; break }
-                100 { [int]$controlSettings.FolderBoost100; break }
-                default { 0 }
-            }
-            if (-not $video.FilterEnabled) { $boost = 0 }
-            return [pscustomobject]@{
-                FilterEnabled = [bool]$video.FilterEnabled
-                Intensity = [int]$video.Intensity
-                Saturation = 100
-                FilterLabel = [string]$video.FilterLabel
-                MpvBoost = [Math]::Max(0, [Math]::Min(100, $boost))
+                FilterEnabled = $enabled
+                Intensity = $intensity
+                Saturation = $saturation
+                FilterLabel = if ($useProfile) { [string]$video.FilterLabel } else { "Manual $intensity/$saturation" }
+                MpvBoost = if ($enabled) { Get-MpvBoost $intensity $saturation } else { 0 }
             }
         }
         default { return $nvidiaFilterOff }
@@ -202,6 +203,7 @@ function Get-EffectiveNvidiaFilter($video, $controlSettings) {
 
 function Get-ClassifiedVideos {
     $knownNames = @{}
+    $classifiedVideoGroups = @(Get-DynamicProfileGroups)
     if (Test-Path -LiteralPath $canonicalVideoRoot) {
         foreach ($video in Get-ChildItem -LiteralPath $canonicalVideoRoot -Filter '*.mp4' -File | Sort-Object Name) {
             $matches = @($classifiedVideoGroups | Where-Object {
@@ -220,6 +222,7 @@ function Get-ClassifiedVideos {
                 Intensity = if ($group) { [int]$group.Intensity } else { 50 }
                 Saturation = 100
                 FilterLabel = if ($group) { [string]$group.Label } else { 'Videos / Unclassified / Off' }
+                IsProfile = [bool]$group
             }
         }
     }
@@ -248,6 +251,7 @@ function Get-ClassifiedVideos {
                 Intensity = 50
                 Saturation = 100
                 FilterLabel = 'Lively existing / Off'
+                IsProfile = $false
             }
         }
         catch {

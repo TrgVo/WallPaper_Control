@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -16,8 +17,8 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("Lively Wallpaper automation and safe MPV color control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.1.0.0")]
-[assembly: AssemblyFileVersion("2.1.0.0")]
+[assembly: AssemblyVersion("2.2.0.0")]
+[assembly: AssemblyFileVersion("2.2.0.0")]
 
 internal static class Theme
 {
@@ -40,9 +41,6 @@ internal sealed class WallpaperSettings
     public string ColorMode = "Off";
     public int Intensity = 50;
     public int Saturation = 100;
-    public int FolderBoost50 = 35;
-    public int FolderBoost70 = 55;
-    public int FolderBoost100 = 80;
 }
 
 internal sealed class RogCard : Panel
@@ -347,18 +345,17 @@ internal sealed class WallpaperControlForm : Form
     private readonly Label autoDetail = new Label();
     private readonly Label colorState = new Label();
     private readonly Label intensityValue = new Label();
-    private readonly Label folderBoost50Value = new Label();
-    private readonly Label folderBoost70Value = new Label();
-    private readonly Label folderBoost100Value = new Label();
+    private readonly Label saturationValue = new Label();
+    private readonly Label colorPreview = new Label();
+    private readonly Label profileState = new Label();
     private readonly Label topStatus = new Label();
     private readonly RogButton autoButton = new RogButton(Theme.Red, Theme.Magenta);
     private readonly RogButton applyButton = new RogButton(Theme.Red, Theme.Magenta);
     private readonly RogButton resetButton = new RogButton(Color.FromArgb(43, 47, 60), Color.FromArgb(61, 66, 83));
+    private readonly RogButton saveProfileButton = new RogButton(Color.FromArgb(0, 112, 152), Theme.Cyan);
     private readonly ComboBox modeCombo = new ComboBox();
     private readonly RogSlider intensitySlider = new RogSlider();
-    private readonly RogSlider folderBoost50Slider = new RogSlider();
-    private readonly RogSlider folderBoost70Slider = new RogSlider();
-    private readonly RogSlider folderBoost100Slider = new RogSlider();
+    private readonly RogSlider saturationSlider = new RogSlider();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
     private readonly NotifyIcon trayIcon = new NotifyIcon();
     private WallpaperSettings settings;
@@ -444,7 +441,7 @@ internal sealed class WallpaperControlForm : Form
         lockPanel.Controls.Add(MakeLabel("NVIDIA DRIVER", 14, 10, 150, 18, Theme.Muted, 8F, FontStyle.Bold));
         lockPanel.Controls.Add(MakeLabel("●  USER CONTROLLED", 14, 33, 160, 23, Theme.Green, 8.5F, FontStyle.Bold));
         sidebar.Controls.Add(lockPanel);
-        sidebar.Controls.Add(MakeLabel("v2.1  ·  FOLDER TUNING", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
+        sidebar.Controls.Add(MakeLabel("v2.2  ·  SAVED PROFILES", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
         Controls.Add(sidebar);
 
         Controls.Add(MakeLabel("SYSTEM DASHBOARD", 252, 91, 350, 34, Theme.Text, 19F, FontStyle.Bold));
@@ -475,7 +472,7 @@ internal sealed class WallpaperControlForm : Form
         colorCard.Controls.Add(safeBadge);
         colorCard.Controls.Add(MakeLabel("Chế độ", 24, 61, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
 
-        modeCombo.Items.AddRange(new object[] { "Tắt tăng màu", "Theo thư mục 50 / 70 / 100", "Thủ công" });
+        modeCombo.Items.AddRange(new object[] { "Tắt tăng màu", "Thủ công + hồ sơ folder" });
         modeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
         modeCombo.FlatStyle = FlatStyle.Flat;
         modeCombo.DrawMode = DrawMode.OwnerDrawFixed;
@@ -499,10 +496,10 @@ internal sealed class WallpaperControlForm : Form
         applyButton.Click += delegate { ApplyColorSettings(); };
         colorCard.Controls.Add(applyButton);
 
-        colorCard.Controls.Add(MakeLabel("Thủ công", 24, 110, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
+        colorCard.Controls.Add(MakeLabel("Intensity", 24, 110, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
         intensitySlider.Location = new Point(111, 102);
         intensitySlider.Size = new Size(405, 40);
-        intensitySlider.ValueChanged += delegate { UpdateIntensityText(); };
+        intensitySlider.ValueChanged += delegate { UpdateColorPreview(); };
         colorCard.Controls.Add(intensitySlider);
         intensityValue.Location = new Point(532, 109);
         intensityValue.Size = new Size(126, 25);
@@ -511,32 +508,38 @@ internal sealed class WallpaperControlForm : Form
         intensityValue.Font = new Font("Segoe UI Semibold", 10F);
         colorCard.Controls.Add(intensityValue);
 
-        colorCard.Controls.Add(MakeLabel("HARD-LINK FOLDER TUNING  ·  SATURATION GỐC 100", 24, 147, 430, 20, Theme.Cyan, 8F, FontStyle.Bold));
-        colorCard.Controls.Add(MakeLabel("Nhóm 50", 24, 180, 78, 22, Theme.Muted, 8.8F, FontStyle.Bold));
-        folderBoost50Slider.Location = new Point(111, 172);
-        folderBoost50Slider.Size = new Size(405, 40);
-        folderBoost50Slider.ValueChanged += delegate { UpdateFolderTuningText(); };
-        colorCard.Controls.Add(folderBoost50Slider);
-        ConfigureFolderValueLabel(folderBoost50Value, 180);
-        colorCard.Controls.Add(folderBoost50Value);
+        colorCard.Controls.Add(MakeLabel("Saturation", 24, 158, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
+        saturationSlider.Location = new Point(111, 150);
+        saturationSlider.Size = new Size(405, 40);
+        saturationSlider.ValueChanged += delegate { UpdateColorPreview(); };
+        colorCard.Controls.Add(saturationSlider);
+        saturationValue.Location = new Point(532, 157);
+        saturationValue.Size = new Size(126, 25);
+        saturationValue.TextAlign = ContentAlignment.MiddleRight;
+        saturationValue.ForeColor = Theme.Magenta;
+        saturationValue.Font = new Font("Segoe UI Semibold", 10F);
+        colorCard.Controls.Add(saturationValue);
 
-        colorCard.Controls.Add(MakeLabel("Nhóm 70", 24, 220, 78, 22, Theme.Muted, 8.8F, FontStyle.Bold));
-        folderBoost70Slider.Location = new Point(111, 212);
-        folderBoost70Slider.Size = new Size(405, 40);
-        folderBoost70Slider.ValueChanged += delegate { UpdateFolderTuningText(); };
-        colorCard.Controls.Add(folderBoost70Slider);
-        ConfigureFolderValueLabel(folderBoost70Value, 220);
-        colorCard.Controls.Add(folderBoost70Value);
+        colorPreview.Location = new Point(24, 197);
+        colorPreview.Size = new Size(634, 24);
+        colorPreview.ForeColor = Theme.Cyan;
+        colorPreview.Font = new Font("Segoe UI Semibold", 8.8F);
+        colorPreview.TextAlign = ContentAlignment.MiddleCenter;
+        colorCard.Controls.Add(colorPreview);
 
-        colorCard.Controls.Add(MakeLabel("Nhóm 100", 24, 260, 78, 22, Theme.Muted, 8.8F, FontStyle.Bold));
-        folderBoost100Slider.Location = new Point(111, 252);
-        folderBoost100Slider.Size = new Size(405, 40);
-        folderBoost100Slider.ValueChanged += delegate { UpdateFolderTuningText(); };
-        colorCard.Controls.Add(folderBoost100Slider);
-        ConfigureFolderValueLabel(folderBoost100Value, 260);
-        colorCard.Controls.Add(folderBoost100Value);
+        saveProfileButton.Text = "LƯU & TẠO FOLDER";
+        saveProfileButton.Location = new Point(24, 232);
+        saveProfileButton.Size = new Size(210, 43);
+        saveProfileButton.Click += delegate { SaveFolderProfile(); };
+        colorCard.Controls.Add(saveProfileButton);
+        profileState.Location = new Point(250, 231);
+        profileState.Size = new Size(408, 46);
+        profileState.ForeColor = Theme.Muted;
+        profileState.Font = new Font("Segoe UI", 8.5F);
+        profileState.TextAlign = ContentAlignment.MiddleLeft;
+        colorCard.Controls.Add(profileState);
 
-        colorState.Location = new Point(24, 300);
+        colorState.Location = new Point(24, 292);
         colorState.Size = new Size(634, 22);
         colorState.ForeColor = Theme.Text;
         colorState.Font = new Font("Segoe UI Semibold", 9F);
@@ -619,52 +622,36 @@ internal sealed class WallpaperControlForm : Form
         }
     }
 
-    private static void ConfigureFolderValueLabel(Label label, int y)
-    {
-        label.Location = new Point(532, y - 1);
-        label.Size = new Size(126, 25);
-        label.TextAlign = ContentAlignment.MiddleRight;
-        label.ForeColor = Theme.Magenta;
-        label.Font = new Font("Segoe UI Semibold", 9.5F);
-    }
-
     private void LoadSettingsIntoControls()
     {
-        modeCombo.SelectedIndex = settings.ColorMode == "PerFolder" ? 1 : settings.ColorMode == "Manual" ? 2 : 0;
+        modeCombo.SelectedIndex = settings.ColorMode == "Manual" || settings.ColorMode == "PerFolder" ? 1 : 0;
         intensitySlider.Value = Math.Max(0, Math.Min(100, settings.Intensity));
-        folderBoost50Slider.Value = Math.Max(0, Math.Min(100, settings.FolderBoost50));
-        folderBoost70Slider.Value = Math.Max(0, Math.Min(100, settings.FolderBoost70));
-        folderBoost100Slider.Value = Math.Max(0, Math.Min(100, settings.FolderBoost100));
-        UpdateIntensityText();
-        UpdateFolderTuningText();
+        saturationSlider.Value = Math.Max(0, Math.Min(100, settings.Saturation));
+        UpdateColorPreview();
         UpdateColorControls();
     }
 
-    private void UpdateIntensityText()
+    private static int CalculateMpvBoost(int intensity, int saturation)
     {
-        int boost = (int)Math.Round(intensitySlider.Value * 0.8);
-        intensityValue.Text = intensitySlider.Value + " / 100   →  +" + boost;
+        return (int)Math.Round(Math.Max(0, Math.Min(100, intensity)) * 0.8 * (Math.Max(0, Math.Min(100, saturation)) / 100.0));
     }
 
-    private void UpdateFolderTuningText()
+    private void UpdateColorPreview()
     {
-        folderBoost50Value.Text = "MPV  +" + folderBoost50Slider.Value;
-        folderBoost70Value.Text = "MPV  +" + folderBoost70Slider.Value;
-        folderBoost100Value.Text = "MPV  +" + folderBoost100Slider.Value;
+        intensityValue.Text = intensitySlider.Value + " / 100";
+        saturationValue.Text = saturationSlider.Value + " / 100";
+        colorPreview.Text = "Đầu ra MPV dự kiến: +" + CalculateMpvBoost(intensitySlider.Value, saturationSlider.Value) +
+            "  ·  folder: RTX DYNAMIC VIBRANCE " + intensitySlider.Value + "-" + saturationSlider.Value;
     }
 
     private void UpdateColorControls()
     {
-        bool manual = modeCombo.SelectedIndex == 2;
-        bool perFolder = modeCombo.SelectedIndex == 1;
+        bool manual = modeCombo.SelectedIndex == 1;
         intensitySlider.Enabled = manual;
         intensityValue.Enabled = manual;
-        folderBoost50Slider.Enabled = perFolder;
-        folderBoost70Slider.Enabled = perFolder;
-        folderBoost100Slider.Enabled = perFolder;
-        folderBoost50Value.Enabled = perFolder;
-        folderBoost70Value.Enabled = perFolder;
-        folderBoost100Value.Enabled = perFolder;
+        saturationSlider.Enabled = manual;
+        saturationValue.Enabled = manual;
+        saveProfileButton.Enabled = manual;
     }
 
     private void RefreshStatus()
@@ -684,6 +671,7 @@ internal sealed class WallpaperControlForm : Form
         autoButton.Text = enabled ? "TẮT AUTO" : "BẬT AUTO";
         autoButton.SetPalette(enabled ? Theme.Red : Color.FromArgb(18, 155, 92), enabled ? Theme.Magenta : Theme.Green);
         colorState.Text = "Cấu hình: " + DescribeColor(settings);
+        RefreshProfileState();
         topStatus.Text = enabled ? "●  SYSTEM ONLINE" : "●  SYSTEM STANDBY";
         topStatus.ForeColor = enabled ? Theme.Green : Theme.Muted;
     }
@@ -710,12 +698,9 @@ internal sealed class WallpaperControlForm : Form
     private void ApplyColorSettings()
     {
         settings = LoadSettings();
-        settings.ColorMode = modeCombo.SelectedIndex == 1 ? "PerFolder" : modeCombo.SelectedIndex == 2 ? "Manual" : "Off";
+        settings.ColorMode = modeCombo.SelectedIndex == 1 ? "Manual" : "Off";
         settings.Intensity = intensitySlider.Value;
-        settings.Saturation = 100;
-        settings.FolderBoost50 = folderBoost50Slider.Value;
-        settings.FolderBoost70 = folderBoost70Slider.Value;
-        settings.FolderBoost100 = folderBoost100Slider.Value;
+        settings.Saturation = saturationSlider.Value;
         SaveSettings(settings);
         RunApplyHelper();
         RefreshStatus();
@@ -727,15 +712,10 @@ internal sealed class WallpaperControlForm : Form
         settings.ColorMode = "Off";
         settings.Intensity = 50;
         settings.Saturation = 100;
-        settings.FolderBoost50 = 35;
-        settings.FolderBoost70 = 55;
-        settings.FolderBoost100 = 80;
         SaveSettings(settings);
         modeCombo.SelectedIndex = 0;
         intensitySlider.Value = 50;
-        folderBoost50Slider.Value = 35;
-        folderBoost70Slider.Value = 55;
-        folderBoost100Slider.Value = 80;
+        saturationSlider.Value = 100;
         RunApplyHelper();
         RefreshStatus();
     }
@@ -755,18 +735,16 @@ internal sealed class WallpaperControlForm : Form
             string key = line.Substring(0, equals).Trim();
             string value = line.Substring(equals + 1).Trim();
             if (section == "Wallpaper" && key == "AutoEnabled") result.AutoEnabled = value != "0";
-            if (section == "Color" && key == "Mode") { result.ColorMode = value; foundColorMode = true; }
+            if (section == "Color" && key == "Mode") { result.ColorMode = value == "PerFolder" ? "Manual" : value; foundColorMode = true; }
             if (section == "NVIDIA" && key == "Mode" && !foundColorMode) result.ColorMode = value;
             int parsed;
             if ((section == "Color" || section == "NVIDIA") && key == "Intensity" && int.TryParse(value, out parsed)) result.Intensity = parsed;
-            if (section == "FolderTuning" && key == "Boost50" && int.TryParse(value, out parsed)) result.FolderBoost50 = parsed;
-            if (section == "FolderTuning" && key == "Boost70" && int.TryParse(value, out parsed)) result.FolderBoost70 = parsed;
-            if (section == "FolderTuning" && key == "Boost100" && int.TryParse(value, out parsed)) result.FolderBoost100 = parsed;
+            if ((section == "Color" || section == "NVIDIA") && key == "Saturation" && int.TryParse(value, out parsed)) result.Saturation = parsed;
         }
-        if (result.ColorMode != "Off" && result.ColorMode != "PerFolder" && result.ColorMode != "Manual") result.ColorMode = "Off";
-        result.FolderBoost50 = Math.Max(0, Math.Min(100, result.FolderBoost50));
-        result.FolderBoost70 = Math.Max(0, Math.Min(100, result.FolderBoost70));
-        result.FolderBoost100 = Math.Max(0, Math.Min(100, result.FolderBoost100));
+        if (result.ColorMode == "PerFolder") result.ColorMode = "Manual";
+        if (result.ColorMode != "Off" && result.ColorMode != "Manual") result.ColorMode = "Off";
+        result.Intensity = Math.Max(0, Math.Min(100, result.Intensity));
+        result.Saturation = Math.Max(0, Math.Min(100, result.Saturation));
         return result;
     }
 
@@ -775,18 +753,99 @@ internal sealed class WallpaperControlForm : Form
         string text = "[Wallpaper]\r\nAutoEnabled=" + (value.AutoEnabled ? "1" : "0") +
                       "\r\n\r\n[Color]\r\nMode=" + value.ColorMode +
                       "\r\nIntensity=" + Math.Max(0, Math.Min(100, value.Intensity)) +
-                      "\r\nSaturation=100\r\n\r\n[FolderTuning]\r\nBoost50=" + Math.Max(0, Math.Min(100, value.FolderBoost50)) +
-                      "\r\nBoost70=" + Math.Max(0, Math.Min(100, value.FolderBoost70)) +
-                      "\r\nBoost100=" + Math.Max(0, Math.Min(100, value.FolderBoost100)) +
+                      "\r\nSaturation=" + Math.Max(0, Math.Min(100, value.Saturation)) +
                       "\r\n\r\n[Safety]\r\nDriverPolicy=Unchanged\r\n";
         File.WriteAllText(SettingsPath, text, new UTF8Encoding(false));
     }
 
     private static string DescribeColor(WallpaperSettings value)
     {
-        if (value.ColorMode == "Manual") return "Thủ công " + value.Intensity + "/100 → MPV +" + (int)Math.Round(value.Intensity * 0.8) + " · Saturation 100";
-        if (value.ColorMode == "PerFolder") return "Theo folder 50/70/100 → MPV +" + value.FolderBoost50 + "/+" + value.FolderBoost70 + "/+" + value.FolderBoost100;
+        if (value.ColorMode == "Manual") return "Thủ công " + value.Intensity + "/" + value.Saturation + " → MPV +" + CalculateMpvBoost(value.Intensity, value.Saturation) + " · folder tự ưu tiên";
         return "Tắt tăng màu MPV · NVIDIA không bị thay đổi";
+    }
+
+    private static string ResolveWallpaperRoot()
+    {
+        string environmentPath = Path.Combine(AutomationRoot, "LivelyEnvironment.ini");
+        try
+        {
+            if (File.Exists(environmentPath))
+            {
+                foreach (string line in File.ReadAllLines(environmentPath))
+                {
+                    if (!line.StartsWith("WallpaperRoot=", StringComparison.OrdinalIgnoreCase)) continue;
+                    string value = line.Substring("WallpaperRoot=".Length).Trim();
+                    if (Directory.Exists(value)) return value;
+                }
+            }
+        }
+        catch { }
+        if (Directory.Exists(Path.Combine(ApplicationRoot, "Videos"))) return ApplicationRoot;
+        return null;
+    }
+
+    private void RefreshProfileState()
+    {
+        string root = ResolveWallpaperRoot();
+        if (string.IsNullOrEmpty(root))
+        {
+            profileState.Text = "Chưa tìm thấy thư mục dữ liệu Lively để lưu hồ sơ.";
+            return;
+        }
+        int count = 0;
+        try
+        {
+            foreach (string directory in Directory.GetDirectories(root, "RTX DYNAMIC VIBRANCE *"))
+                if (Regex.IsMatch(Path.GetFileName(directory), @"^RTX DYNAMIC VIBRANCE \d{1,3}-\d{1,3}$", RegexOptions.IgnoreCase)) count++;
+        }
+        catch { }
+        profileState.Text = "Đã nhận " + count + " hồ sơ folder. Video trong folder sẽ tự dùng cấu hình ghi trên tên.";
+    }
+
+    private void SaveFolderProfile()
+    {
+        int intensity = intensitySlider.Value;
+        int saturation = saturationSlider.Value;
+        string root = ResolveWallpaperRoot();
+        if (string.IsNullOrEmpty(root))
+        {
+            MessageBox.Show("Không tìm thấy thư mục dữ liệu Lively Wallpaper.", "Wallpaper Control", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        string folderName = "RTX DYNAMIC VIBRANCE " + intensity + "-" + saturation;
+        string folderPath = Path.Combine(root, folderName);
+        settings = LoadSettings();
+        settings.ColorMode = "Manual";
+        settings.Intensity = intensity;
+        settings.Saturation = saturation;
+        SaveSettings(settings);
+        modeCombo.SelectedIndex = 1;
+        RunApplyHelper();
+
+        if (Directory.Exists(folderPath))
+        {
+            MessageBox.Show("Hồ sơ đã tồn tại:\n" + folderName + "\n\nBạn có thể đặt hard-link video vào folder này.", "Hồ sơ màu", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshStatus();
+            return;
+        }
+
+        DialogResult choice = MessageBox.Show(
+            "Lưu cấu hình Intensity " + intensity + " / Saturation " + saturation + " và tạo folder:\n\n" + folderName +
+            "\n\nVideo được đặt bằng hard-link trong folder này sẽ tự dùng đúng cấu hình trên. Tạo folder ngay?",
+            "Tạo hồ sơ màu", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (choice != DialogResult.Yes) { RefreshStatus(); return; }
+
+        try
+        {
+            Directory.CreateDirectory(folderPath);
+            MessageBox.Show("Đã tạo hồ sơ:\n" + folderPath + "\n\nVideo gốc vẫn nên giữ trong folder Videos; folder hồ sơ chỉ chứa hard-link.", "Đã lưu hồ sơ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Không thể tạo folder hồ sơ:\n" + ex.Message, "Wallpaper Control", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        RefreshStatus();
     }
 
     private static void StopShuffle()

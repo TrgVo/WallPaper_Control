@@ -35,9 +35,11 @@ Video đã đăng ký trong Lively được đọc từ `LivelyInfo.json` và s�
 
 - Ứng dụng không ghi, bật hoặc tắt trạng thái NVIDIA; game và NVIDIA App tự quản lý RTX Dynamic Vibrance/Game Filter.
 - Color Boost dùng thuộc tính saturation của tiến trình MPV, nên chỉ thay đổi video hình nền.
-- Các mức phân loại vẫn là Intensity `50 / 70 / 100`, Saturation cơ sở `100`.
-- Video luôn được phát từ thư mục `Videos`; bốn thư mục phân loại hard-link chỉ được dùng làm nhãn màu.
-- Chế độ theo thư mục cho phép chỉnh độc lập đầu ra MPV của ba nhóm, mặc định `+35 / +55 / +80`.
+- Giao diện có hai chế độ màu: **Tắt tăng màu** và **Thủ công + hồ sơ folder**.
+- Chế độ thủ công cho phép chỉnh độc lập Intensity và Saturation từ `0–100`; mặc định Saturation là `100`.
+- Nút **LƯU & TẠO FOLDER** tạo hồ sơ theo mẫu `RTX DYNAMIC VIBRANCE <Intensity>-<Saturation>`.
+- Video luôn được phát từ thư mục `Videos`; các thư mục hồ sơ hard-link chỉ được dùng làm nhãn cấu hình.
+- Dịch vụ tự nhận mọi thư mục đúng mẫu, không giới hạn ở ba mức `50/70/100` có sẵn.
 - Thiết lập mặc định sau lần cài đầu: Auto Wallpaper **Off**, Color Boost **Off**.
 
 ## Thư mục phân loại
@@ -51,7 +53,7 @@ RTX DYNAMIC VIBRANCE 70-100
 RTX DYNAMIC VIBRANCE 100-100
 ```
 
-Wallpaper Control vẫn tương thích với cách phân loại bằng hard link. Với máy chưa phân loại, video MP4 hiện có trong thư viện Lively được dùng ở chế độ màu trung tính mà không tạo bản sao.
+Wallpaper Control vẫn tương thích với cách phân loại bằng hard link. Ba folder có sẵn được đọc thành các hồ sơ `50/100`, `70/100` và `100/100`. Người dùng có thể tạo thêm, ví dụ `RTX DYNAMIC VIBRANCE 85-90`; video nằm trong folder đó sẽ tự dùng Intensity `85`, Saturation `90`. Video chưa phân loại dùng cấu hình thủ công chung, còn folder `NONE RTX DYANMIC VIBRANCE` luôn tắt tăng màu.
 
 ## Tính năng
 
@@ -92,10 +94,10 @@ Kết quả nằm tại `dist\WallpaperControlSetup.exe`.
 
 ## Kiểm tra file phát hành
 
-SHA-256 của bản `2.1.0.0` hiện tại:
+SHA-256 của bản `2.2.0.0` hiện tại:
 
 ```text
-39BB42D40F0C2900811AF378EC9E5820402F1A2BC151EDBEA70E05F8BADB714D
+66DEB4EAFE0C3F23667F714059D3711EB29E78CC5862F95922E032FA1AB00CB0
 ```
 
 ## Tham khảo Lively chính thức

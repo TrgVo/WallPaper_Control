@@ -14,8 +14,8 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyDescription("Portable one-file setup for Lively Wallpaper Control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.1.0.0")]
-[assembly: AssemblyFileVersion("2.1.0.0")]
+[assembly: AssemblyVersion("2.2.0.0")]
+[assembly: AssemblyFileVersion("2.2.0.0")]
 
 internal sealed class LivelyDetection
 {
@@ -175,7 +175,7 @@ internal static class PortableInstaller
         if (!File.Exists(settings))
         {
             File.WriteAllText(settings,
-                "[Wallpaper]\r\nAutoEnabled=0\r\n\r\n[Color]\r\nMode=Off\r\nIntensity=50\r\nSaturation=100\r\n\r\n[FolderTuning]\r\nBoost50=35\r\nBoost70=55\r\nBoost100=80\r\n\r\n[Safety]\r\nDriverPolicy=Unchanged\r\n",
+                "[Wallpaper]\r\nAutoEnabled=0\r\n\r\n[Color]\r\nMode=Off\r\nIntensity=50\r\nSaturation=100\r\n\r\n[Safety]\r\nDriverPolicy=Unchanged\r\n",
                 new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(automation, "wallpaper-auto.disabled"), "Disabled after first install\r\n", new UTF8Encoding(false));
         }

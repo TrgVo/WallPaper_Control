@@ -59,47 +59,53 @@ function Read-Settings {
     # an existing installation migrates without losing the selected mode.
     $mode = [string]$values['color.mode']
     if (-not $mode) { $mode = [string]$values['nvidia.mode'] }
-    if ($mode -notin @('Off', 'PerFolder', 'Manual')) { $mode = 'Off' }
+    if ($mode -eq 'PerFolder') { $mode = 'Manual' }
+    if ($mode -notin @('Off', 'Manual')) { $mode = 'Off' }
     $intensityText = [string]$values['color.intensity']
     if (-not $intensityText) { $intensityText = [string]$values['nvidia.intensity'] }
     $intensity = 50
     [void][int]::TryParse($intensityText, [ref]$intensity)
-    $folderBoost50 = 35
-    $folderBoost70 = 55
-    $folderBoost100 = 80
-    [void][int]::TryParse([string]$values['foldertuning.boost50'], [ref]$folderBoost50)
-    [void][int]::TryParse([string]$values['foldertuning.boost70'], [ref]$folderBoost70)
-    [void][int]::TryParse([string]$values['foldertuning.boost100'], [ref]$folderBoost100)
+    $saturationText = [string]$values['color.saturation']
+    if (-not $saturationText) { $saturationText = [string]$values['nvidia.saturation'] }
+    $saturation = 100
+    [void][int]::TryParse($saturationText, [ref]$saturation)
     return [pscustomobject]@{
         Mode = $mode
         Intensity = [Math]::Max(0, [Math]::Min(100, $intensity))
-        Saturation = 100
-        FolderBoost50 = [Math]::Max(0, [Math]::Min(100, $folderBoost50))
-        FolderBoost70 = [Math]::Max(0, [Math]::Min(100, $folderBoost70))
-        FolderBoost100 = [Math]::Max(0, [Math]::Min(100, $folderBoost100))
+        Saturation = [Math]::Max(0, [Math]::Min(100, $saturation))
     }
 }
 
-function Get-PerFolderFilter {
+function Get-MpvBoost([int]$intensity, [int]$saturation) {
+    $safeIntensity = [Math]::Max(0, [Math]::Min(100, $intensity))
+    $safeSaturation = [Math]::Max(0, [Math]::Min(100, $saturation))
+    return [int][Math]::Round($safeIntensity * 0.8 * ($safeSaturation / 100.0))
+}
+
+function Get-CurrentVideoFilter {
     $name = $null
     if (Test-Path -LiteralPath $statePath) {
         try { $name = [string](Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).Current } catch { }
     }
-    if (-not $name) { return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100; Boost = 0 } }
+    if (-not $name) { return [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) } }
 
-    if (-not $wallpaperRoot) { return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100; Boost = 0 } }
+    if (-not $wallpaperRoot) { return [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) } }
     $groups = @(
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'NONE RTX DYANMIC VIBRANCE'); Enabled = 0; Intensity = 50; Boost = 0 }
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 50-100'); Enabled = 1; Intensity = 50; Boost = $settings.FolderBoost50 }
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 70-100'); Enabled = 1; Intensity = 70; Boost = $settings.FolderBoost70 }
-        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'RTX DYNAMIC VIBRANCE 100-100'); Enabled = 1; Intensity = 100; Boost = $settings.FolderBoost100 }
+        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'NONE RTX DYANMIC VIBRANCE'); Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 }
+        [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'NONE RTX DYNAMIC VIBRANCE'); Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 }
     )
+    foreach ($directory in Get-ChildItem -LiteralPath $wallpaperRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name) {
+        if ($directory.Name -notmatch '^RTX DYNAMIC VIBRANCE (\d{1,3})-(\d{1,3})$') { continue }
+        $intensity = [Math]::Max(0, [Math]::Min(100, [int]$matches[1]))
+        $saturation = [Math]::Max(0, [Math]::Min(100, [int]$matches[2]))
+        $groups += [pscustomobject]@{ Path = $directory.FullName; Enabled = 1; Intensity = $intensity; Saturation = $saturation; Boost = (Get-MpvBoost $intensity $saturation) }
+    }
     foreach ($group in $groups) {
         if (Test-Path -LiteralPath (Join-Path $group.Path $name)) {
-            return [pscustomobject]@{ Enabled = $group.Enabled; Intensity = $group.Intensity; Saturation = 100; Boost = $group.Boost }
+            return [pscustomobject]@{ Enabled = $group.Enabled; Intensity = $group.Intensity; Saturation = $group.Saturation; Boost = $group.Boost }
         }
     }
-    return [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100; Boost = 0 }
+    return [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) }
 }
 
 function Get-MpvSaturationBoost($filter) {
@@ -135,14 +141,13 @@ function Set-MpvWallpaperColor([int]$boost) {
 
 $settings = Read-Settings
 $filter = switch ($settings.Mode) {
-    'Manual' { [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = 100; Boost = [int][Math]::Round($settings.Intensity * 0.8) }; break }
-    'PerFolder' { Get-PerFolderFilter; break }
-    default { [pscustomobject]@{ Enabled = 0; Intensity = 50; Saturation = 100 } }
+    'Manual' { Get-CurrentVideoFilter; break }
+    default { [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 } }
 }
 
 $boost = Get-MpvSaturationBoost $filter
 $updatedPipes = Set-MpvWallpaperColor $boost
 
 if (-not $Silent) {
-    "Mode=$($settings.Mode) Intensity=$($filter.Intensity) Saturation=100 MpvBoost=+$boost Nvidia=Unchanged Pipes=$updatedPipes"
+    "Mode=$($settings.Mode) Intensity=$($filter.Intensity) Saturation=$($filter.Saturation) MpvBoost=+$boost Nvidia=Unchanged Pipes=$updatedPipes"
 }
