@@ -59,8 +59,8 @@ function Read-Settings {
     # an existing installation migrates without losing the selected mode.
     $mode = [string]$values['color.mode']
     if (-not $mode) { $mode = [string]$values['nvidia.mode'] }
-    if ($mode -eq 'PerFolder') { $mode = 'Manual' }
-    if ($mode -notin @('Off', 'Manual')) { $mode = 'Off' }
+    if ($mode -eq 'PerFolder') { $mode = 'Profiles' }
+    if ($mode -notin @('Off', 'Manual', 'Profiles')) { $mode = 'Off' }
     $intensityText = [string]$values['color.intensity']
     if (-not $intensityText) { $intensityText = [string]$values['nvidia.intensity'] }
     $intensity = 50
@@ -82,14 +82,14 @@ function Get-MpvBoost([int]$intensity, [int]$saturation) {
     return [int][Math]::Round($safeIntensity * 0.8 * ($safeSaturation / 100.0))
 }
 
-function Get-CurrentVideoFilter {
+function Get-CurrentVideoProfile {
     $name = $null
     if (Test-Path -LiteralPath $statePath) {
         try { $name = [string](Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).Current } catch { }
     }
-    if (-not $name) { return [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) } }
+    if (-not $name) { return [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 } }
 
-    if (-not $wallpaperRoot) { return [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) } }
+    if (-not $wallpaperRoot) { return [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 } }
     $groups = @(
         [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'NONE RTX DYANMIC VIBRANCE'); Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 }
         [pscustomobject]@{ Path = (Join-Path $wallpaperRoot 'NONE RTX DYNAMIC VIBRANCE'); Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 }
@@ -105,7 +105,7 @@ function Get-CurrentVideoFilter {
             return [pscustomobject]@{ Enabled = $group.Enabled; Intensity = $group.Intensity; Saturation = $group.Saturation; Boost = $group.Boost }
         }
     }
-    return [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) }
+    return [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 }
 }
 
 function Get-MpvSaturationBoost($filter) {
@@ -141,7 +141,8 @@ function Set-MpvWallpaperColor([int]$boost) {
 
 $settings = Read-Settings
 $filter = switch ($settings.Mode) {
-    'Manual' { Get-CurrentVideoFilter; break }
+    'Manual' { [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) }; break }
+    'Profiles' { Get-CurrentVideoProfile; break }
     default { [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 } }
 }
 

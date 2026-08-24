@@ -35,8 +35,9 @@ Video đã đăng ký trong Lively được đọc từ `LivelyInfo.json` và s�
 
 - Ứng dụng không ghi, bật hoặc tắt trạng thái NVIDIA; game và NVIDIA App tự quản lý RTX Dynamic Vibrance/Game Filter.
 - Color Boost dùng thuộc tính saturation của tiến trình MPV, nên chỉ thay đổi video hình nền.
-- Giao diện có hai chế độ màu: **Tắt tăng màu** và **Thủ công + hồ sơ folder**.
-- Chế độ thủ công cho phép chỉnh độc lập Intensity và Saturation từ `0–100`; mặc định Saturation là `100`.
+- Giao diện có ba chế độ màu tách biệt: **Tắt tăng màu**, **Thủ công**, và **Dùng hồ sơ folder đã tạo**.
+- Chế độ thủ công cho phép chỉnh Intensity và Saturation từ `0–100` rồi áp dụng chung, không đọc phân loại folder; mặc định Saturation là `100`.
+- Chế độ hồ sơ tự đọc cấu hình từ tên folder; video chưa phân loại sẽ không được tăng màu.
 - Nút **LƯU & TẠO FOLDER** tạo hồ sơ theo mẫu `RTX DYNAMIC VIBRANCE <Intensity>-<Saturation>`.
 - Video luôn được phát từ thư mục `Videos`; các thư mục hồ sơ hard-link chỉ được dùng làm nhãn cấu hình.
 - Dịch vụ tự nhận mọi thư mục đúng mẫu, không giới hạn ở ba mức `50/70/100` có sẵn.
@@ -53,7 +54,7 @@ RTX DYNAMIC VIBRANCE 70-100
 RTX DYNAMIC VIBRANCE 100-100
 ```
 
-Wallpaper Control vẫn tương thích với cách phân loại bằng hard link. Ba folder có sẵn được đọc thành các hồ sơ `50/100`, `70/100` và `100/100`. Người dùng có thể tạo thêm, ví dụ `RTX DYNAMIC VIBRANCE 85-90`; video nằm trong folder đó sẽ tự dùng Intensity `85`, Saturation `90`. Video chưa phân loại dùng cấu hình thủ công chung, còn folder `NONE RTX DYANMIC VIBRANCE` luôn tắt tăng màu.
+Wallpaper Control vẫn tương thích với cách phân loại bằng hard link. Bộ đếm gồm cả bốn folder: một folder `NONE` và ba hồ sơ màu có sẵn `50/100`, `70/100`, `100/100`. Người dùng có thể tạo thêm, ví dụ `RTX DYNAMIC VIBRANCE 85-90`; ở chế độ hồ sơ, video nằm trong folder đó sẽ tự dùng Intensity `85`, Saturation `90`. Folder `NONE RTX DYANMIC VIBRANCE` luôn tắt tăng màu trong chế độ hồ sơ.
 
 ## Tính năng
 
@@ -94,10 +95,10 @@ Kết quả nằm tại `dist\WallpaperControlSetup.exe`.
 
 ## Kiểm tra file phát hành
 
-SHA-256 của bản `2.2.0.0` hiện tại:
+SHA-256 của bản `2.3.0.0` hiện tại:
 
 ```text
-66DEB4EAFE0C3F23667F714059D3711EB29E78CC5862F95922E032FA1AB00CB0
+A39589201C46FF02EC789FA35D481A3EFB81E5E2B6BE813CCDB1ED557B6FA855
 ```
 
 ## Tham khảo Lively chính thức

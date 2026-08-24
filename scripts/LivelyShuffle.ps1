@@ -137,8 +137,8 @@ function Get-WallpaperControlSettings {
 
     $mode = [string]$values['color.mode']
     if (-not $mode) { $mode = [string]$values['nvidia.mode'] }
-    if ($mode -eq 'PerFolder') { $mode = 'Manual' }
-    if ($mode -notin @('Off', 'Manual')) { $mode = 'Off' }
+    if ($mode -eq 'PerFolder') { $mode = 'Profiles' }
+    if ($mode -notin @('Off', 'Manual', 'Profiles')) { $mode = 'Off' }
     $intensity = 50
     $saturation = 100
     $intensityText = [string]$values['color.intensity']
@@ -185,15 +185,26 @@ function Get-DynamicProfileGroups {
 function Get-EffectiveNvidiaFilter($video, $controlSettings) {
     switch ($controlSettings.NvidiaMode) {
         'Manual' {
-            $useProfile = [bool]$video.IsProfile
-            $enabled = if ($useProfile) { [bool]$video.FilterEnabled } else { $true }
-            $intensity = if ($useProfile) { [int]$video.Intensity } else { [int]$controlSettings.Intensity }
-            $saturation = if ($useProfile) { [int]$video.Saturation } else { [int]$controlSettings.Saturation }
+            $intensity = [int]$controlSettings.Intensity
+            $saturation = [int]$controlSettings.Saturation
+            return [pscustomobject]@{
+                FilterEnabled = $true
+                Intensity = $intensity
+                Saturation = $saturation
+                FilterLabel = "Manual $intensity/$saturation"
+                MpvBoost = Get-MpvBoost $intensity $saturation
+            }
+        }
+        'Profiles' {
+            if (-not [bool]$video.IsProfile) { return $nvidiaFilterOff }
+            $enabled = [bool]$video.FilterEnabled
+            $intensity = [int]$video.Intensity
+            $saturation = [int]$video.Saturation
             return [pscustomobject]@{
                 FilterEnabled = $enabled
                 Intensity = $intensity
                 Saturation = $saturation
-                FilterLabel = if ($useProfile) { [string]$video.FilterLabel } else { "Manual $intensity/$saturation" }
+                FilterLabel = [string]$video.FilterLabel
                 MpvBoost = if ($enabled) { Get-MpvBoost $intensity $saturation } else { 0 }
             }
         }

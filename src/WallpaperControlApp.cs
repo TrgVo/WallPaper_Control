@@ -17,8 +17,8 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("Lively Wallpaper automation and safe MPV color control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.2.0.0")]
-[assembly: AssemblyFileVersion("2.2.0.0")]
+[assembly: AssemblyVersion("2.3.0.0")]
+[assembly: AssemblyFileVersion("2.3.0.0")]
 
 internal static class Theme
 {
@@ -441,7 +441,7 @@ internal sealed class WallpaperControlForm : Form
         lockPanel.Controls.Add(MakeLabel("NVIDIA DRIVER", 14, 10, 150, 18, Theme.Muted, 8F, FontStyle.Bold));
         lockPanel.Controls.Add(MakeLabel("●  USER CONTROLLED", 14, 33, 160, 23, Theme.Green, 8.5F, FontStyle.Bold));
         sidebar.Controls.Add(lockPanel);
-        sidebar.Controls.Add(MakeLabel("v2.2  ·  SAVED PROFILES", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
+        sidebar.Controls.Add(MakeLabel("v2.3  ·  PROFILE MODES", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
         Controls.Add(sidebar);
 
         Controls.Add(MakeLabel("SYSTEM DASHBOARD", 252, 91, 350, 34, Theme.Text, 19F, FontStyle.Bold));
@@ -472,7 +472,7 @@ internal sealed class WallpaperControlForm : Form
         colorCard.Controls.Add(safeBadge);
         colorCard.Controls.Add(MakeLabel("Chế độ", 24, 61, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
 
-        modeCombo.Items.AddRange(new object[] { "Tắt tăng màu", "Thủ công + hồ sơ folder" });
+        modeCombo.Items.AddRange(new object[] { "Tắt tăng màu", "Thủ công", "Dùng hồ sơ folder đã tạo" });
         modeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
         modeCombo.FlatStyle = FlatStyle.Flat;
         modeCombo.DrawMode = DrawMode.OwnerDrawFixed;
@@ -624,7 +624,7 @@ internal sealed class WallpaperControlForm : Form
 
     private void LoadSettingsIntoControls()
     {
-        modeCombo.SelectedIndex = settings.ColorMode == "Manual" || settings.ColorMode == "PerFolder" ? 1 : 0;
+        modeCombo.SelectedIndex = settings.ColorMode == "Profiles" || settings.ColorMode == "PerFolder" ? 2 : settings.ColorMode == "Manual" ? 1 : 0;
         intensitySlider.Value = Math.Max(0, Math.Min(100, settings.Intensity));
         saturationSlider.Value = Math.Max(0, Math.Min(100, settings.Saturation));
         UpdateColorPreview();
@@ -698,7 +698,7 @@ internal sealed class WallpaperControlForm : Form
     private void ApplyColorSettings()
     {
         settings = LoadSettings();
-        settings.ColorMode = modeCombo.SelectedIndex == 1 ? "Manual" : "Off";
+        settings.ColorMode = modeCombo.SelectedIndex == 1 ? "Manual" : modeCombo.SelectedIndex == 2 ? "Profiles" : "Off";
         settings.Intensity = intensitySlider.Value;
         settings.Saturation = saturationSlider.Value;
         SaveSettings(settings);
@@ -735,14 +735,14 @@ internal sealed class WallpaperControlForm : Form
             string key = line.Substring(0, equals).Trim();
             string value = line.Substring(equals + 1).Trim();
             if (section == "Wallpaper" && key == "AutoEnabled") result.AutoEnabled = value != "0";
-            if (section == "Color" && key == "Mode") { result.ColorMode = value == "PerFolder" ? "Manual" : value; foundColorMode = true; }
+            if (section == "Color" && key == "Mode") { result.ColorMode = value == "PerFolder" ? "Profiles" : value; foundColorMode = true; }
             if (section == "NVIDIA" && key == "Mode" && !foundColorMode) result.ColorMode = value;
             int parsed;
             if ((section == "Color" || section == "NVIDIA") && key == "Intensity" && int.TryParse(value, out parsed)) result.Intensity = parsed;
             if ((section == "Color" || section == "NVIDIA") && key == "Saturation" && int.TryParse(value, out parsed)) result.Saturation = parsed;
         }
-        if (result.ColorMode == "PerFolder") result.ColorMode = "Manual";
-        if (result.ColorMode != "Off" && result.ColorMode != "Manual") result.ColorMode = "Off";
+        if (result.ColorMode == "PerFolder") result.ColorMode = "Profiles";
+        if (result.ColorMode != "Off" && result.ColorMode != "Manual" && result.ColorMode != "Profiles") result.ColorMode = "Off";
         result.Intensity = Math.Max(0, Math.Min(100, result.Intensity));
         result.Saturation = Math.Max(0, Math.Min(100, result.Saturation));
         return result;
@@ -760,7 +760,8 @@ internal sealed class WallpaperControlForm : Form
 
     private static string DescribeColor(WallpaperSettings value)
     {
-        if (value.ColorMode == "Manual") return "Thủ công " + value.Intensity + "/" + value.Saturation + " → MPV +" + CalculateMpvBoost(value.Intensity, value.Saturation) + " · folder tự ưu tiên";
+        if (value.ColorMode == "Manual") return "Thủ công " + value.Intensity + "/" + value.Saturation + " → MPV +" + CalculateMpvBoost(value.Intensity, value.Saturation) + " · áp dụng chung";
+        if (value.ColorMode == "Profiles") return "Dùng hồ sơ folder · video chưa phân loại sẽ không tăng màu";
         return "Tắt tăng màu MPV · NVIDIA không bị thay đổi";
     }
 
@@ -792,14 +793,20 @@ internal sealed class WallpaperControlForm : Form
             profileState.Text = "Chưa tìm thấy thư mục dữ liệu Lively để lưu hồ sơ.";
             return;
         }
-        int count = 0;
+        int colorCount = 0;
+        int offCount = 0;
         try
         {
-            foreach (string directory in Directory.GetDirectories(root, "RTX DYNAMIC VIBRANCE *"))
-                if (Regex.IsMatch(Path.GetFileName(directory), @"^RTX DYNAMIC VIBRANCE \d{1,3}-\d{1,3}$", RegexOptions.IgnoreCase)) count++;
+            foreach (string directory in Directory.GetDirectories(root))
+            {
+                string name = Path.GetFileName(directory);
+                if (name.Equals("NONE RTX DYANMIC VIBRANCE", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("NONE RTX DYNAMIC VIBRANCE", StringComparison.OrdinalIgnoreCase)) offCount++;
+                else if (Regex.IsMatch(name, @"^RTX DYNAMIC VIBRANCE \d{1,3}-\d{1,3}$", RegexOptions.IgnoreCase)) colorCount++;
+            }
         }
         catch { }
-        profileState.Text = "Đã nhận " + count + " hồ sơ folder. Video trong folder sẽ tự dùng cấu hình ghi trên tên.";
+        profileState.Text = "Đã nhận " + (offCount + colorCount) + " folder cấu hình: " + offCount + " tắt màu + " + colorCount + " hồ sơ màu.";
     }
 
     private void SaveFolderProfile()
