@@ -30,7 +30,7 @@ function Resolve-LivelyEnvironment {
             $json = Get-Content -LiteralPath $candidate -Raw | ConvertFrom-Json
             $root = [string]$json.WallpaperDir
             if ($root) {
-                return [pscustomobject]@{ SettingsPath = $candidate; WallpaperRoot = $root }
+                return [pscustomobject]@{ SettingsPath = $candidate; DataRoot = (Split-Path -Parent $candidate); WallpaperRoot = $root }
             }
         }
         catch { }
@@ -40,6 +40,7 @@ function Resolve-LivelyEnvironment {
 
 $livelyEnvironment = Resolve-LivelyEnvironment
 $wallpaperRoot = if ($livelyEnvironment) { $livelyEnvironment.WallpaperRoot } else { $null }
+$livelyDataRoot = if ($livelyEnvironment) { $livelyEnvironment.DataRoot } else { $null }
 
 function Read-Settings {
     $values = @{}
@@ -101,10 +102,30 @@ function Sync-NewProfileVideosToCanonicalRoot {
     }
 }
 
+function Get-RunningLivelyVideoName {
+    if (-not $livelyDataRoot) { return $null }
+    $layoutPath = Join-Path $livelyDataRoot 'WallpaperLayout.json'
+    if (-not (Test-Path -LiteralPath $layoutPath)) { return $null }
+    try {
+        $layout = @(Get-Content -LiteralPath $layoutPath -Raw | ConvertFrom-Json)
+        foreach ($entry in $layout) {
+            if ([bool]$entry.LivelyScreen.isStale) { continue }
+            $infoPath = Join-Path ([string]$entry.LivelyInfoPath) 'LivelyInfo.json'
+            if (-not (Test-Path -LiteralPath $infoPath)) { continue }
+            $fileName = [string](Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json).FileName
+            if ($fileName) { return [IO.Path]::GetFileName($fileName) }
+        }
+    }
+    catch { }
+    return $null
+}
+
 function Get-CurrentVideoProfile {
-    $name = $null
+    $name = Get-RunningLivelyVideoName
     if (Test-Path -LiteralPath $statePath) {
-        try { $name = [string](Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).Current } catch { }
+        if (-not $name) {
+            try { $name = [string](Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).Current } catch { }
+        }
     }
     if (-not $name) { return [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 } }
 

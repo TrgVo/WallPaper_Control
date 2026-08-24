@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -18,8 +19,8 @@ using Microsoft.Win32.SafeHandles;
 [assembly: AssemblyDescription("Lively Wallpaper automation and safe MPV color control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.4.0.0")]
-[assembly: AssemblyFileVersion("2.4.0.0")]
+[assembly: AssemblyVersion("2.4.1.0")]
+[assembly: AssemblyFileVersion("2.4.1.0")]
 
 internal static class Theme
 {
@@ -473,7 +474,7 @@ internal sealed class WallpaperControlForm : Form
         lockPanel.Controls.Add(MakeLabel("NVIDIA DRIVER", 14, 10, 150, 18, Theme.Muted, 8F, FontStyle.Bold));
         lockPanel.Controls.Add(MakeLabel("●  USER CONTROLLED", 14, 33, 160, 23, Theme.Green, 8.5F, FontStyle.Bold));
         sidebar.Controls.Add(lockPanel);
-        sidebar.Controls.Add(MakeLabel("v2.4  ·  LIVE STATUS", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
+        sidebar.Controls.Add(MakeLabel("v2.4.1  ·  LIVE STATUS", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
         Controls.Add(sidebar);
 
         Controls.Add(MakeLabel("SYSTEM DASHBOARD", 252, 91, 350, 34, Theme.Text, 19F, FontStyle.Bold));
@@ -880,8 +881,89 @@ internal sealed class WallpaperControlForm : Form
         catch { return new string[0]; }
     }
 
+    private static string ResolveLivelyDataRoot()
+    {
+        string environmentPath = Path.Combine(AutomationRoot, "LivelyEnvironment.ini");
+        try
+        {
+            if (File.Exists(environmentPath))
+            {
+                foreach (string line in File.ReadAllLines(environmentPath))
+                {
+                    if (!line.StartsWith("DataRoot=", StringComparison.OrdinalIgnoreCase)) continue;
+                    string value = line.Substring("DataRoot=".Length).Trim();
+                    if (Directory.Exists(value)) return value;
+                }
+            }
+        }
+        catch { }
+
+        var candidates = new List<string>();
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        candidates.Add(Path.Combine(local, "Lively Wallpaper", "Settings.json"));
+        candidates.Add(Path.Combine(local, "Temp", "Lively Wallpaper", "Settings.json"));
+        string packages = Path.Combine(local, "Packages");
+        try
+        {
+            if (Directory.Exists(packages))
+                foreach (string directory in Directory.GetDirectories(packages, "*LivelyWallpaper*"))
+                    candidates.Add(Path.Combine(directory, "LocalCache", "Local", "Lively Wallpaper", "Settings.json"));
+        }
+        catch { }
+
+        string selected = null;
+        DateTime selectedTime = DateTime.MinValue;
+        foreach (string candidate in candidates)
+        {
+            try
+            {
+                if (!File.Exists(candidate)) continue;
+                DateTime writeTime = File.GetLastWriteTimeUtc(candidate);
+                if (selected == null || writeTime > selectedTime) { selected = candidate; selectedTime = writeTime; }
+            }
+            catch { }
+        }
+        return selected == null ? null : Path.GetDirectoryName(selected);
+    }
+
+    private static string ReadCurrentVideoFromLively()
+    {
+        string dataRoot = ResolveLivelyDataRoot();
+        if (string.IsNullOrEmpty(dataRoot)) return null;
+        string layoutPath = Path.Combine(dataRoot, "WallpaperLayout.json");
+        if (!File.Exists(layoutPath)) return null;
+        try
+        {
+            string layoutJson = File.ReadAllText(layoutPath, Encoding.UTF8);
+            MatchCollection entries = Regex.Matches(layoutJson,
+                @"""isStale""\s*:\s*(true|false)[\s\S]*?""LivelyInfoPath""\s*:\s*""((?:\\.|[^""])*)""",
+                RegexOptions.IgnoreCase);
+            foreach (Match entry in entries)
+            {
+                if (entry.Groups[1].Value.Equals("true", StringComparison.OrdinalIgnoreCase)) continue;
+                string infoPath = UnescapeJsonString(entry.Groups[2].Value);
+                string infoFile = Path.Combine(infoPath, "LivelyInfo.json");
+                if (!File.Exists(infoFile)) continue;
+                Match fileNameMatch = Regex.Match(File.ReadAllText(infoFile, Encoding.UTF8),
+                    @"""FileName""\s*:\s*""((?:\\.|[^""])*)""", RegexOptions.IgnoreCase);
+                if (!fileNameMatch.Success) continue;
+                string fileName = UnescapeJsonString(fileNameMatch.Groups[1].Value);
+                if (!string.IsNullOrEmpty(fileName)) return Path.GetFileName(fileName);
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string UnescapeJsonString(string value)
+    {
+        return value.Replace("\\/", "/").Replace("\\\"", "\"").Replace("\\\\", "\\");
+    }
+
     private static string ReadCurrentVideoName()
     {
+        string livelyVideo = ReadCurrentVideoFromLively();
+        if (!string.IsNullOrEmpty(livelyVideo)) return livelyVideo;
         string statePath = Path.Combine(AutomationRoot, "shuffle-state.json");
         try
         {

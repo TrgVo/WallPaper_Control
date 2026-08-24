@@ -14,8 +14,8 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyDescription("Portable one-file setup for Lively Wallpaper Control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.4.0.0")]
-[assembly: AssemblyFileVersion("2.4.0.0")]
+[assembly: AssemblyVersion("2.4.1.0")]
+[assembly: AssemblyFileVersion("2.4.1.0")]
 
 internal sealed class LivelyDetection
 {
