@@ -82,6 +82,25 @@ function Get-MpvBoost([int]$intensity, [int]$saturation) {
     return [int][Math]::Round($safeIntensity * 0.8 * ($safeSaturation / 100.0))
 }
 
+function Sync-NewProfileVideosToCanonicalRoot {
+    if (-not $wallpaperRoot) { return }
+    $canonicalRoot = Join-Path $wallpaperRoot 'Videos'
+    if (-not (Test-Path -LiteralPath $canonicalRoot)) {
+        New-Item -ItemType Directory -Path $canonicalRoot | Out-Null
+    }
+    $profileFolders = @(Get-ChildItem -LiteralPath $wallpaperRoot -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -in @('NONE RTX DYANMIC VIBRANCE', 'NONE RTX DYNAMIC VIBRANCE') -or
+        $_.Name -match '^RTX DYNAMIC VIBRANCE \d{1,3}-\d{1,3}$'
+    })
+    foreach ($folder in $profileFolders) {
+        foreach ($profileVideo in Get-ChildItem -LiteralPath $folder.FullName -Filter '*.mp4' -File -ErrorAction SilentlyContinue) {
+            $canonicalPath = Join-Path $canonicalRoot $profileVideo.Name
+            if (Test-Path -LiteralPath $canonicalPath -PathType Leaf) { continue }
+            try { New-Item -ItemType HardLink -Path $canonicalPath -Target $profileVideo.FullName | Out-Null } catch { }
+        }
+    }
+}
+
 function Get-CurrentVideoProfile {
     $name = $null
     if (Test-Path -LiteralPath $statePath) {
@@ -139,6 +158,7 @@ function Set-MpvWallpaperColor([int]$boost) {
     return $successCount
 }
 
+Sync-NewProfileVideosToCanonicalRoot
 $settings = Read-Settings
 $filter = switch ($settings.Mode) {
     'Manual' { [pscustomobject]@{ Enabled = 1; Intensity = $settings.Intensity; Saturation = $settings.Saturation; Boost = (Get-MpvBoost $settings.Intensity $settings.Saturation) }; break }

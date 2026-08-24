@@ -12,13 +12,14 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 
 [assembly: AssemblyTitle("Wallpaper Control")]
 [assembly: AssemblyDescription("Lively Wallpaper automation and safe MPV color control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.3.0.0")]
-[assembly: AssemblyFileVersion("2.3.0.0")]
+[assembly: AssemblyVersion("2.4.0.0")]
+[assembly: AssemblyFileVersion("2.4.0.0")]
 
 internal static class Theme
 {
@@ -210,6 +211,29 @@ internal static class NativeMethods
 
     [DllImport("ole32.dll")]
     public static extern int PropVariantClear(ref PropVariant value);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CreateHardLink(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetFileInformationByHandle(SafeFileHandle fileHandle, out ByHandleFileInformation fileInformation);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct ByHandleFileInformation
+{
+    public uint FileAttributes;
+    public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+    public uint VolumeSerialNumber;
+    public uint FileSizeHigh;
+    public uint FileSizeLow;
+    public uint NumberOfLinks;
+    public uint FileIndexHigh;
+    public uint FileIndexLow;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -348,6 +372,9 @@ internal sealed class WallpaperControlForm : Form
     private readonly Label saturationValue = new Label();
     private readonly Label colorPreview = new Label();
     private readonly Label profileState = new Label();
+    private readonly Label currentVideoName = new Label();
+    private readonly Label currentVideoConfig = new Label();
+    private readonly Label storageStatus = new Label();
     private readonly Label topStatus = new Label();
     private readonly RogButton autoButton = new RogButton(Theme.Red, Theme.Magenta);
     private readonly RogButton applyButton = new RogButton(Theme.Red, Theme.Magenta);
@@ -362,6 +389,9 @@ internal sealed class WallpaperControlForm : Form
     private bool exitRequested;
     private volatile bool showRequested;
     private DateTime nextServiceRestartUtc = DateTime.MinValue;
+    private DateTime nextStorageSyncUtc = DateTime.MinValue;
+    private volatile bool storageSyncRunning;
+    private string lastStorageSummary = "Đang kiểm tra hard-link và dung lượng...";
 
     public WallpaperControlForm(string userActivationSignalPath)
     {
@@ -373,6 +403,7 @@ internal sealed class WallpaperControlForm : Form
         Shown += delegate { ShellIntegration.EnsureInstalled(); };
         statusTimer.Interval = 1000;
         statusTimer.Tick += delegate {
+            if (DateTime.UtcNow >= nextStorageSyncUtc) StartStorageSync();
             if (showRequested || File.Exists(activationSignalPath))
             {
                 showRequested = false;
@@ -382,6 +413,7 @@ internal sealed class WallpaperControlForm : Form
             else RefreshStatus();
         };
         statusTimer.Start();
+        StartStorageSync();
     }
 
     private void BuildInterface()
@@ -441,30 +473,30 @@ internal sealed class WallpaperControlForm : Form
         lockPanel.Controls.Add(MakeLabel("NVIDIA DRIVER", 14, 10, 150, 18, Theme.Muted, 8F, FontStyle.Bold));
         lockPanel.Controls.Add(MakeLabel("●  USER CONTROLLED", 14, 33, 160, 23, Theme.Green, 8.5F, FontStyle.Bold));
         sidebar.Controls.Add(lockPanel);
-        sidebar.Controls.Add(MakeLabel("v2.3  ·  PROFILE MODES", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
+        sidebar.Controls.Add(MakeLabel("v2.4  ·  LIVE STATUS", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
         Controls.Add(sidebar);
 
         Controls.Add(MakeLabel("SYSTEM DASHBOARD", 252, 91, 350, 34, Theme.Text, 19F, FontStyle.Bold));
         Controls.Add(MakeLabel("Điều khiển hình nền, chuyển cảnh và màu video an toàn", 254, 126, 520, 24, Theme.Muted, 9.5F, FontStyle.Regular));
 
-        var autoCard = new RogCard { Location = new Point(252, 168), Size = new Size(692, 154), AccentColor = Theme.Red };
-        autoCard.Controls.Add(MakeLabel("AUTO WALLPAPER", 24, 18, 220, 24, Theme.Text, 11F, FontStyle.Bold));
-        autoCard.Controls.Add(MakeLabel("LIVELY SHUFFLE SERVICE", 24, 44, 210, 18, Theme.Muted, 7.8F, FontStyle.Bold));
-        autoState.Location = new Point(24, 78);
+        var autoCard = new RogCard { Location = new Point(252, 168), Size = new Size(692, 130), AccentColor = Theme.Red };
+        autoCard.Controls.Add(MakeLabel("AUTO WALLPAPER", 24, 13, 220, 24, Theme.Text, 11F, FontStyle.Bold));
+        autoCard.Controls.Add(MakeLabel("LIVELY SHUFFLE SERVICE", 24, 38, 210, 18, Theme.Muted, 7.8F, FontStyle.Bold));
+        autoState.Location = new Point(24, 65);
         autoState.Size = new Size(220, 25);
         autoState.Font = new Font("Segoe UI Semibold", 11F);
         autoCard.Controls.Add(autoState);
-        autoDetail.Location = new Point(24, 108);
+        autoDetail.Location = new Point(24, 94);
         autoDetail.Size = new Size(420, 22);
         autoDetail.ForeColor = Theme.Muted;
         autoCard.Controls.Add(autoDetail);
-        autoButton.Location = new Point(492, 51);
+        autoButton.Location = new Point(492, 38);
         autoButton.Size = new Size(166, 54);
         autoButton.Click += delegate { ToggleAutoWallpaper(); };
         autoCard.Controls.Add(autoButton);
         Controls.Add(autoCard);
 
-        var colorCard = new RogCard { Location = new Point(252, 340), Size = new Size(692, 370), AccentColor = Theme.Magenta };
+        var colorCard = new RogCard { Location = new Point(252, 310), Size = new Size(692, 310), AccentColor = Theme.Magenta };
         colorCard.Controls.Add(MakeLabel("WALLPAPER COLOR BOOST", 24, 17, 280, 24, Theme.Text, 11F, FontStyle.Bold));
         var safeBadge = MakeLabel("MPV ONLY  ·  SAFE", 500, 15, 158, 28, Theme.Cyan, 8.5F, FontStyle.Bold);
         safeBadge.BackColor = Color.FromArgb(16, 42, 51);
@@ -496,31 +528,31 @@ internal sealed class WallpaperControlForm : Form
         applyButton.Click += delegate { ApplyColorSettings(); };
         colorCard.Controls.Add(applyButton);
 
-        colorCard.Controls.Add(MakeLabel("Intensity", 24, 110, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
-        intensitySlider.Location = new Point(111, 102);
+        colorCard.Controls.Add(MakeLabel("Intensity", 24, 102, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
+        intensitySlider.Location = new Point(111, 94);
         intensitySlider.Size = new Size(405, 40);
         intensitySlider.ValueChanged += delegate { UpdateColorPreview(); };
         colorCard.Controls.Add(intensitySlider);
-        intensityValue.Location = new Point(532, 109);
+        intensityValue.Location = new Point(532, 101);
         intensityValue.Size = new Size(126, 25);
         intensityValue.TextAlign = ContentAlignment.MiddleRight;
         intensityValue.ForeColor = Theme.Magenta;
         intensityValue.Font = new Font("Segoe UI Semibold", 10F);
         colorCard.Controls.Add(intensityValue);
 
-        colorCard.Controls.Add(MakeLabel("Saturation", 24, 158, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
-        saturationSlider.Location = new Point(111, 150);
+        colorCard.Controls.Add(MakeLabel("Saturation", 24, 140, 80, 22, Theme.Muted, 9F, FontStyle.Bold));
+        saturationSlider.Location = new Point(111, 132);
         saturationSlider.Size = new Size(405, 40);
         saturationSlider.ValueChanged += delegate { UpdateColorPreview(); };
         colorCard.Controls.Add(saturationSlider);
-        saturationValue.Location = new Point(532, 157);
+        saturationValue.Location = new Point(532, 139);
         saturationValue.Size = new Size(126, 25);
         saturationValue.TextAlign = ContentAlignment.MiddleRight;
         saturationValue.ForeColor = Theme.Magenta;
         saturationValue.Font = new Font("Segoe UI Semibold", 10F);
         colorCard.Controls.Add(saturationValue);
 
-        colorPreview.Location = new Point(24, 197);
+        colorPreview.Location = new Point(24, 169);
         colorPreview.Size = new Size(634, 24);
         colorPreview.ForeColor = Theme.Cyan;
         colorPreview.Font = new Font("Segoe UI Semibold", 8.8F);
@@ -528,29 +560,47 @@ internal sealed class WallpaperControlForm : Form
         colorCard.Controls.Add(colorPreview);
 
         saveProfileButton.Text = "LƯU & TẠO FOLDER";
-        saveProfileButton.Location = new Point(24, 232);
-        saveProfileButton.Size = new Size(210, 43);
+        saveProfileButton.Location = new Point(24, 199);
+        saveProfileButton.Size = new Size(210, 39);
         saveProfileButton.Click += delegate { SaveFolderProfile(); };
         colorCard.Controls.Add(saveProfileButton);
-        profileState.Location = new Point(250, 231);
-        profileState.Size = new Size(408, 46);
+        profileState.Location = new Point(250, 198);
+        profileState.Size = new Size(408, 42);
         profileState.ForeColor = Theme.Muted;
         profileState.Font = new Font("Segoe UI", 8.5F);
         profileState.TextAlign = ContentAlignment.MiddleLeft;
         colorCard.Controls.Add(profileState);
 
-        colorState.Location = new Point(24, 292);
+        colorState.Location = new Point(24, 244);
         colorState.Size = new Size(634, 22);
         colorState.ForeColor = Theme.Text;
         colorState.Font = new Font("Segoe UI Semibold", 9F);
         colorCard.Controls.Add(colorState);
-        var safetyLine = MakeLabel("Videos = nguồn phát · folder phụ = nhãn hard-link · NVIDIA/game không bị thay đổi", 24, 332, 634, 25, Theme.Muted, 8.5F, FontStyle.Regular);
+        var safetyLine = MakeLabel("Videos = nguồn phát · folder phụ = nhãn hard-link · NVIDIA/game không bị thay đổi", 24, 273, 634, 25, Theme.Muted, 8.5F, FontStyle.Regular);
         safetyLine.BackColor = Color.FromArgb(17, 22, 30);
         safetyLine.TextAlign = ContentAlignment.MiddleCenter;
         colorCard.Controls.Add(safetyLine);
         Controls.Add(colorCard);
 
-        Controls.Add(MakeLabel("Nút X thu Control xuống tray · dùng menu tray để thoát hoàn toàn", 252, 728, 500, 20, Color.FromArgb(91, 98, 116), 8F, FontStyle.Regular));
+        var currentCard = new RogCard { Location = new Point(252, 632), Size = new Size(692, 112), AccentColor = Theme.Cyan };
+        currentCard.Controls.Add(MakeLabel("ĐANG PHÁT  ·  CẤU HÌNH THỰC TẾ", 24, 12, 330, 22, Theme.Text, 10F, FontStyle.Bold));
+        currentVideoName.Location = new Point(24, 38);
+        currentVideoName.Size = new Size(634, 22);
+        currentVideoName.ForeColor = Theme.Text;
+        currentVideoName.Font = new Font("Segoe UI Semibold", 9F);
+        currentCard.Controls.Add(currentVideoName);
+        currentVideoConfig.Location = new Point(24, 61);
+        currentVideoConfig.Size = new Size(634, 22);
+        currentVideoConfig.ForeColor = Theme.Cyan;
+        currentVideoConfig.Font = new Font("Segoe UI Semibold", 8.8F);
+        currentCard.Controls.Add(currentVideoConfig);
+        storageStatus.Location = new Point(24, 85);
+        storageStatus.Size = new Size(634, 21);
+        storageStatus.ForeColor = Theme.Muted;
+        storageStatus.Font = new Font("Segoe UI", 8.2F);
+        currentCard.Controls.Add(storageStatus);
+        Controls.Add(currentCard);
+
 
         BuildTrayMenu();
         FormClosing += OnFormClosing;
@@ -652,6 +702,9 @@ internal sealed class WallpaperControlForm : Form
         saturationSlider.Enabled = manual;
         saturationValue.Enabled = manual;
         saveProfileButton.Enabled = manual;
+        if (manual) UpdateColorPreview();
+        else if (modeCombo.SelectedIndex == 2) colorPreview.Text = "Hồ sơ folder đang điều khiển màu · xem cấu hình thực tế bên dưới";
+        else colorPreview.Text = "Tăng màu đang tắt · đầu ra MPV +0";
     }
 
     private void RefreshStatus()
@@ -672,6 +725,7 @@ internal sealed class WallpaperControlForm : Form
         autoButton.SetPalette(enabled ? Theme.Red : Color.FromArgb(18, 155, 92), enabled ? Theme.Magenta : Theme.Green);
         colorState.Text = "Cấu hình: " + DescribeColor(settings);
         RefreshProfileState();
+        RefreshCurrentVideoStatus();
         topStatus.Text = enabled ? "●  SYSTEM ONLINE" : "●  SYSTEM STANDBY";
         topStatus.ForeColor = enabled ? Theme.Green : Theme.Muted;
     }
@@ -807,6 +861,207 @@ internal sealed class WallpaperControlForm : Form
         }
         catch { }
         profileState.Text = "Đã nhận " + (offCount + colorCount) + " folder cấu hình: " + offCount + " tắt màu + " + colorCount + " hồ sơ màu.";
+    }
+
+    private static bool IsProfileFolderName(string name)
+    {
+        return name.Equals("NONE RTX DYANMIC VIBRANCE", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("NONE RTX DYNAMIC VIBRANCE", StringComparison.OrdinalIgnoreCase) ||
+               Regex.IsMatch(name, @"^RTX DYNAMIC VIBRANCE \d{1,3}-\d{1,3}$", RegexOptions.IgnoreCase);
+    }
+
+    private static string[] GetProfileDirectories(string root)
+    {
+        try
+        {
+            string[] directories = Directory.GetDirectories(root);
+            return Array.FindAll(directories, delegate(string directory) { return IsProfileFolderName(Path.GetFileName(directory)); });
+        }
+        catch { return new string[0]; }
+    }
+
+    private static string ReadCurrentVideoName()
+    {
+        string statePath = Path.Combine(AutomationRoot, "shuffle-state.json");
+        try
+        {
+            if (!File.Exists(statePath)) return null;
+            Match match = Regex.Match(File.ReadAllText(statePath, Encoding.UTF8), "\\\"Current\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"");
+            if (!match.Success) return null;
+            return match.Groups[1].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
+        }
+        catch { return null; }
+    }
+
+    private static bool TryGetVideoProfile(string root, string videoName, out bool enabled, out int intensity, out int saturation, out string folderName)
+    {
+        enabled = false;
+        intensity = 0;
+        saturation = 100;
+        folderName = null;
+        if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(videoName)) return false;
+
+        foreach (string directory in GetProfileDirectories(root))
+        {
+            string name = Path.GetFileName(directory);
+            if (!name.StartsWith("NONE ", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!File.Exists(Path.Combine(directory, videoName))) continue;
+            folderName = name;
+            return true;
+        }
+        foreach (string directory in GetProfileDirectories(root))
+        {
+            string name = Path.GetFileName(directory);
+            Match match = Regex.Match(name, @"^RTX DYNAMIC VIBRANCE (\d{1,3})-(\d{1,3})$", RegexOptions.IgnoreCase);
+            if (!match.Success || !File.Exists(Path.Combine(directory, videoName))) continue;
+            enabled = true;
+            intensity = Math.Max(0, Math.Min(100, int.Parse(match.Groups[1].Value)));
+            saturation = Math.Max(0, Math.Min(100, int.Parse(match.Groups[2].Value)));
+            folderName = name;
+            return true;
+        }
+        return false;
+    }
+
+    private void RefreshCurrentVideoStatus()
+    {
+        string videoName = ReadCurrentVideoName();
+        storageStatus.Text = "Lưu trữ: " + lastStorageSummary;
+        if (string.IsNullOrEmpty(videoName))
+        {
+            currentVideoName.Text = "Video: chưa xác định";
+            currentVideoConfig.Text = "Cấu hình thực tế: chưa có trạng thái phát từ Auto Wallpaper";
+            return;
+        }
+
+        currentVideoName.Text = "Video: " + videoName;
+        if (settings.ColorMode == "Off")
+        {
+            currentVideoConfig.Text = "Cấu hình thực tế: Tắt tăng màu · MPV +0";
+            return;
+        }
+        if (settings.ColorMode == "Manual")
+        {
+            currentVideoConfig.Text = "Cấu hình thực tế: Thủ công · Intensity " + settings.Intensity + " · Saturation " + settings.Saturation + " · MPV +" + CalculateMpvBoost(settings.Intensity, settings.Saturation);
+            return;
+        }
+
+        bool profileEnabled;
+        int profileIntensity;
+        int profileSaturation;
+        string profileFolder;
+        if (!TryGetVideoProfile(ResolveWallpaperRoot(), videoName, out profileEnabled, out profileIntensity, out profileSaturation, out profileFolder))
+        {
+            currentVideoConfig.Text = "Cấu hình thực tế: Chưa phân loại · MPV +0";
+        }
+        else if (!profileEnabled)
+        {
+            currentVideoConfig.Text = "Cấu hình thực tế: NONE · Tắt tăng màu · MPV +0";
+        }
+        else
+        {
+            currentVideoConfig.Text = "Cấu hình thực tế: " + profileFolder + " · Intensity " + profileIntensity + " · Saturation " + profileSaturation + " · MPV +" + CalculateMpvBoost(profileIntensity, profileSaturation);
+        }
+    }
+
+    private void StartStorageSync()
+    {
+        if (storageSyncRunning) return;
+        storageSyncRunning = true;
+        nextStorageSyncUtc = DateTime.UtcNow.AddSeconds(15);
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            try { lastStorageSummary = SynchronizeProfileStorage(); }
+            catch (Exception ex) { lastStorageSummary = "không thể đồng bộ: " + ex.Message; }
+            finally { storageSyncRunning = false; }
+        });
+    }
+
+    private static string GetPhysicalFileId(string path)
+    {
+        try
+        {
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                ByHandleFileInformation info;
+                if (!NativeMethods.GetFileInformationByHandle(stream.SafeFileHandle, out info)) return null;
+                return info.VolumeSerialNumber.ToString("X8") + ":" + info.FileIndexHigh.ToString("X8") + info.FileIndexLow.ToString("X8");
+            }
+        }
+        catch { return null; }
+    }
+
+    private static bool FilesHaveEqualContent(string first, string second)
+    {
+        var firstInfo = new FileInfo(first);
+        var secondInfo = new FileInfo(second);
+        if (firstInfo.Length != secondInfo.Length) return false;
+        const int bufferSize = 1024 * 1024;
+        byte[] firstBuffer = new byte[bufferSize];
+        byte[] secondBuffer = new byte[bufferSize];
+        using (var firstStream = new FileStream(first, FileMode.Open, FileAccess.Read, FileShare.Read))
+        using (var secondStream = new FileStream(second, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            while (true)
+            {
+                int firstRead = firstStream.Read(firstBuffer, 0, firstBuffer.Length);
+                int secondRead = secondStream.Read(secondBuffer, 0, secondBuffer.Length);
+                if (firstRead != secondRead) return false;
+                if (firstRead == 0) return true;
+                for (int index = 0; index < firstRead; index++) if (firstBuffer[index] != secondBuffer[index]) return false;
+            }
+        }
+    }
+
+    private static string SynchronizeProfileStorage()
+    {
+        string root = ResolveWallpaperRoot();
+        if (string.IsNullOrEmpty(root)) return "chưa tìm thấy WallpaperDir";
+        string canonicalRoot = Path.Combine(root, "Videos");
+        Directory.CreateDirectory(canonicalRoot);
+        int created = 0;
+        int deduplicated = 0;
+        int linked = 0;
+        int conflicts = 0;
+        int errors = 0;
+
+        foreach (string profileDirectory in GetProfileDirectories(root))
+        {
+            string[] files;
+            try { files = Directory.GetFiles(profileDirectory, "*.mp4", SearchOption.TopDirectoryOnly); }
+            catch { errors++; continue; }
+            foreach (string profileVideo in files)
+            {
+                string canonicalVideo = Path.Combine(canonicalRoot, Path.GetFileName(profileVideo));
+                try
+                {
+                    if (!File.Exists(canonicalVideo))
+                    {
+                        if (NativeMethods.CreateHardLink(canonicalVideo, profileVideo, IntPtr.Zero)) created++; else errors++;
+                        continue;
+                    }
+                    string profileId = GetPhysicalFileId(profileVideo);
+                    string canonicalId = GetPhysicalFileId(canonicalVideo);
+                    if (!string.IsNullOrEmpty(profileId) && profileId == canonicalId) { linked++; continue; }
+                    if (!FilesHaveEqualContent(profileVideo, canonicalVideo)) { conflicts++; continue; }
+
+                    File.Delete(profileVideo);
+                    if (NativeMethods.CreateHardLink(profileVideo, canonicalVideo, IntPtr.Zero)) deduplicated++;
+                    else
+                    {
+                        File.Copy(canonicalVideo, profileVideo, false);
+                        errors++;
+                    }
+                }
+                catch { errors++; }
+            }
+        }
+        string result = linked + " hard-link hợp lệ";
+        if (created > 0) result += " · " + created + " video đã liên kết về Videos";
+        if (deduplicated > 0) result += " · " + deduplicated + " bản sao đã giải phóng";
+        if (conflicts > 0) result += " · " + conflicts + " trùng tên khác nội dung";
+        if (errors > 0) result += " · " + errors + " lỗi";
+        return result;
     }
 
     private void SaveFolderProfile()

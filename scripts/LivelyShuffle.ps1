@@ -182,6 +182,26 @@ function Get-DynamicProfileGroups {
     return @($groups)
 }
 
+function Sync-NewProfileVideosToCanonicalRoot {
+    if (-not (Test-Path -LiteralPath $canonicalVideoRoot)) {
+        New-Item -ItemType Directory -Path $canonicalVideoRoot | Out-Null
+    }
+    foreach ($group in Get-DynamicProfileGroups) {
+        if (-not (Test-Path -LiteralPath $group.Path)) { continue }
+        foreach ($profileVideo in Get-ChildItem -LiteralPath $group.Path -Filter '*.mp4' -File -ErrorAction SilentlyContinue) {
+            $canonicalPath = Join-Path $canonicalVideoRoot $profileVideo.Name
+            if (Test-Path -LiteralPath $canonicalPath -PathType Leaf) { continue }
+            try {
+                New-Item -ItemType HardLink -Path $canonicalPath -Target $profileVideo.FullName | Out-Null
+                Write-Log "Linked profile video into canonical Videos folder: $($profileVideo.Name)"
+            }
+            catch {
+                Write-Log "Could not link profile video into Videos: $($profileVideo.Name); $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
 function Get-EffectiveNvidiaFilter($video, $controlSettings) {
     switch ($controlSettings.NvidiaMode) {
         'Manual' {
@@ -214,6 +234,7 @@ function Get-EffectiveNvidiaFilter($video, $controlSettings) {
 
 function Get-ClassifiedVideos {
     $knownNames = @{}
+    Sync-NewProfileVideosToCanonicalRoot
     $classifiedVideoGroups = @(Get-DynamicProfileGroups)
     if (Test-Path -LiteralPath $canonicalVideoRoot) {
         foreach ($video in Get-ChildItem -LiteralPath $canonicalVideoRoot -Filter '*.mp4' -File | Sort-Object Name) {

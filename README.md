@@ -41,6 +41,9 @@ Video đã đăng ký trong Lively được đọc từ `LivelyInfo.json` và s�
 - Nút **LƯU & TẠO FOLDER** tạo hồ sơ theo mẫu `RTX DYNAMIC VIBRANCE <Intensity>-<Saturation>`.
 - Video luôn được phát từ thư mục `Videos`; các thư mục hồ sơ hard-link chỉ được dùng làm nhãn cấu hình.
 - Dịch vụ tự nhận mọi thư mục đúng mẫu, không giới hạn ở ba mức `50/70/100` có sẵn.
+- Bảng **Đang phát · Cấu hình thực tế** hiển thị video hiện tại, hồ sơ khớp, Intensity, Saturation và mức MPV đang dùng.
+- Video MP4 mới được thêm vào folder cấu hình sẽ tự có hard-link tương ứng trong `Videos`.
+- Nếu `Videos` và folder cấu hình chứa hai bản sao trùng nội dung, app thay bản trong folder cấu hình bằng hard-link; file trùng tên nhưng khác nội dung không bị ghi đè.
 - Thiết lập mặc định sau lần cài đầu: Auto Wallpaper **Off**, Color Boost **Off**.
 
 ## Thư mục phân loại
@@ -65,6 +68,7 @@ Wallpaper Control vẫn tương thích với cách phân loại bằng hard link
 - Chuyển video qua MPV IPC và giữ cửa sổ Lively ổn định.
 - Fade hai giai đoạn, rút ngắn vùng gần đen để giảm cảm giác lưu ảnh khi chuyển cảnh.
 - Smart scaling theo độ phân giải/tỷ lệ khung hình.
+- Đồng bộ hard-link nền giúp các folder cấu hình và thư viện Lively không nhân đôi dữ liệu video.
 - Một tiến trình Control cho mỗi tài khoản Windows.
 - Setup một file, tự phát hiện Lively và cấu hình smart scaling một lần.
 
@@ -95,10 +99,10 @@ Kết quả nằm tại `dist\WallpaperControlSetup.exe`.
 
 ## Kiểm tra file phát hành
 
-SHA-256 của bản `2.3.0.0` hiện tại:
+SHA-256 của bản `2.4.0.0` hiện tại:
 
 ```text
-A39589201C46FF02EC789FA35D481A3EFB81E5E2B6BE813CCDB1ED557B6FA855
+DE5100845BCCA669D46686B7BCCCD53C521754CA908AD6FC8F38B196DEBD202A
 ```
 
 ## Tham khảo Lively chính thức
