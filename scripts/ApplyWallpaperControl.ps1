@@ -1,9 +1,14 @@
-param([switch]$Silent)
+param(
+    [switch]$Silent,
+    [ValidateRange(1, 20)][int]$RetryCount = 1,
+    [ValidateRange(50, 5000)][int]$RetryDelayMilliseconds = 250
+)
 
 $ErrorActionPreference = 'Stop'
 $automationRoot = $PSScriptRoot
 $settingsPath = Join-Path $automationRoot 'WallpaperControl.ini'
 $statePath = Join-Path $automationRoot 'shuffle-state.json'
+$servicePidPath = Join-Path $automationRoot 'lively-shuffle.pid'
 
 function Resolve-LivelyEnvironment {
     $configuredSettings = $null
@@ -107,7 +112,14 @@ function Get-RunningLivelyVideoName {
     $layoutPath = Join-Path $livelyDataRoot 'WallpaperLayout.json'
     if (-not (Test-Path -LiteralPath $layoutPath)) { return $null }
     try {
-        $layout = @(Get-Content -LiteralPath $layoutPath -Raw | ConvertFrom-Json)
+        $parsedLayout = Get-Content -LiteralPath $layoutPath -Raw | ConvertFrom-Json
+        $layout = @()
+        # Windows PowerShell 5.1 can keep a top-level JSON array nested as one
+        # item. Flatten it explicitly so each monitor entry is evaluated.
+        if ($parsedLayout -is [Array]) {
+            foreach ($layoutEntry in $parsedLayout) { $layout += $layoutEntry }
+        }
+        elseif ($null -ne $parsedLayout) { $layout += $parsedLayout }
         foreach ($entry in $layout) {
             if ([bool]$entry.LivelyScreen.isStale) { continue }
             $infoPath = Join-Path ([string]$entry.LivelyInfoPath) 'LivelyInfo.json'
@@ -120,13 +132,68 @@ function Get-RunningLivelyVideoName {
     return $null
 }
 
-function Get-CurrentVideoProfile {
-    $name = Get-RunningLivelyVideoName
-    if (Test-Path -LiteralPath $statePath) {
-        if (-not $name) {
-            try { $name = [string](Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).Current } catch { }
+function Get-RunningMpvVideoName {
+    foreach ($pipe in Get-ChildItem -LiteralPath '\\.\pipe\' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^mpvsocket' }) {
+        $client = $null
+        $writer = $null
+        $reader = $null
+        try {
+            $client = New-Object IO.Pipes.NamedPipeClientStream('.', $pipe.Name, ([IO.Pipes.PipeDirection]::InOut), ([IO.Pipes.PipeOptions]::None))
+            $client.Connect(350)
+            $writer = New-Object IO.StreamWriter($client, (New-Object Text.UTF8Encoding($false)), 1024, $true)
+            $reader = New-Object IO.StreamReader($client, (New-Object Text.UTF8Encoding($false)), $false, 1024, $true)
+            $writer.AutoFlush = $true
+            $requestId = Get-Random -Minimum 100000 -Maximum 999999
+            $message = @{ command = @('get_property', 'path'); request_id = $requestId } | ConvertTo-Json -Compress
+            $writer.WriteLine($message)
+            do {
+                $responseText = $reader.ReadLine()
+                if (-not $responseText) { break }
+                $response = $responseText | ConvertFrom-Json
+            } while ([int]$response.request_id -ne $requestId)
+
+            if ($responseText -and $response.error -eq 'success' -and [string]$response.data) {
+                $videoName = [IO.Path]::GetFileName([string]$response.data)
+                if ($videoName -and $wallpaperRoot) {
+                    $canonicalVideo = Join-Path (Join-Path $wallpaperRoot 'Videos') $videoName
+                    $isKnownProfile = @(Get-ChildItem -LiteralPath $wallpaperRoot -Directory -ErrorAction SilentlyContinue | Where-Object {
+                        ($_.Name -in @('NONE RTX DYANMIC VIBRANCE', 'NONE RTX DYNAMIC VIBRANCE') -or
+                         $_.Name -match '^RTX DYNAMIC VIBRANCE \d{1,3}-\d{1,3}$') -and
+                        (Test-Path -LiteralPath (Join-Path $_.FullName $videoName) -PathType Leaf)
+                    }).Count -gt 0
+                    if ((Test-Path -LiteralPath $canonicalVideo -PathType Leaf) -or $isKnownProfile) { return $videoName }
+                }
+            }
+        }
+        catch { }
+        finally {
+            if ($reader) { $reader.Dispose() }
+            if ($writer) { $writer.Dispose() }
+            if ($client) { $client.Dispose() }
         }
     }
+    return $null
+}
+
+function Get-CurrentVideoProfile {
+    $mpvVideoName = Get-RunningMpvVideoName
+    $shuffleVideoName = $null
+    if (Test-Path -LiteralPath $statePath) {
+        try { $shuffleVideoName = [string](Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).Current } catch { }
+    }
+
+    $shuffleRunning = $false
+    if (Test-Path -LiteralPath $servicePidPath) {
+        try {
+            $servicePid = [int](Get-Content -LiteralPath $servicePidPath -Raw).Trim()
+            $shuffleRunning = $null -ne (Get-Process -Id $servicePid -ErrorAction SilentlyContinue)
+        }
+        catch { }
+    }
+    # Seamless loadfile keeps Lively's original package in WallpaperLayout.json.
+    # While Auto Wallpaper is active, shuffle-state is the authoritative video.
+    $name = if ($mpvVideoName) { $mpvVideoName } elseif ($shuffleRunning -and $shuffleVideoName) { $shuffleVideoName } else { Get-RunningLivelyVideoName }
+    if (-not $name) { $name = $shuffleVideoName }
     if (-not $name) { return [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 } }
 
     if (-not $wallpaperRoot) { return [pscustomobject]@{ Enabled = 0; Intensity = 0; Saturation = 100; Boost = 0 } }
@@ -165,8 +232,14 @@ function Set-MpvWallpaperColor([int]$boost) {
             $writer = New-Object IO.StreamWriter($client, (New-Object Text.UTF8Encoding($false)), 1024, $true)
             $reader = New-Object IO.StreamReader($client, (New-Object Text.UTF8Encoding($false)), $false, 1024, $true)
             $writer.AutoFlush = $true
-            $writer.WriteLine('{"command":["set_property","saturation",' + $boost + ']}')
-            $responseText = $reader.ReadLine()
+            $requestId = Get-Random -Minimum 100000 -Maximum 999999
+            $message = @{ command = @('set_property', 'saturation', $boost); request_id = $requestId } | ConvertTo-Json -Compress
+            $writer.WriteLine($message)
+            do {
+                $responseText = $reader.ReadLine()
+                if (-not $responseText) { break }
+                $response = $responseText | ConvertFrom-Json
+            } while ([int]$response.request_id -ne $requestId)
             if ($responseText -and (($responseText | ConvertFrom-Json).error -eq 'success')) { $successCount++ }
         }
         catch { }
@@ -188,8 +261,12 @@ $filter = switch ($settings.Mode) {
 }
 
 $boost = Get-MpvSaturationBoost $filter
-$updatedPipes = Set-MpvWallpaperColor $boost
+$updatedPipes = 0
+for ($attempt = 1; $attempt -le $RetryCount; $attempt++) {
+    $updatedPipes = [Math]::Max($updatedPipes, (Set-MpvWallpaperColor $boost))
+    if ($attempt -lt $RetryCount) { Start-Sleep -Milliseconds $RetryDelayMilliseconds }
+}
 
 if (-not $Silent) {
-    "Mode=$($settings.Mode) Intensity=$($filter.Intensity) Saturation=$($filter.Saturation) MpvBoost=+$boost Nvidia=Unchanged Pipes=$updatedPipes"
+    "Mode=$($settings.Mode) Intensity=$($filter.Intensity) Saturation=$($filter.Saturation) MpvBoost=+$boost Nvidia=Unchanged Pipes=$updatedPipes Attempts=$RetryCount"
 }

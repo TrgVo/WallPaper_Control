@@ -17,7 +17,7 @@ Bộ cài không cần quyền Administrator. Ứng dụng được cài vào:
 %LOCALAPPDATA%\Programs\Wallpaper Control
 ```
 
-Setup tự tạo shortcut Desktop, Start Menu và tùy chọn khởi động cùng Windows. Chạy lại cùng file Setup để cập nhật hoặc gỡ Wallpaper Control. Thao tác gỡ không xóa video hay thư viện Lively.
+Setup tự tạo shortcut Desktop, Start Menu và tùy chọn khởi động cùng Windows. Sau khi cài, có thể bật/tắt lại tùy chọn này ngay trong app. Khi được Windows gọi lúc đăng nhập, Wallpaper Control chạy ẩn dưới khay hệ thống và tự nạp các chức năng nền mà không hiện cửa sổ. Chạy lại cùng file Setup để cập nhật hoặc gỡ Wallpaper Control. Thao tác gỡ không xóa video hay thư viện Lively.
 
 > File hiện chưa được ký bằng chứng thư thương mại nên Windows SmartScreen có thể hiển thị `Unknown publisher`.
 
@@ -62,6 +62,10 @@ Wallpaper Control vẫn tương thích với cách phân loại bằng hard link
 ## Tính năng
 
 - Giao diện gaming đỏ–đen và tray icon.
+- Cửa sổ co giãn từ `760×590`, kéo được ở mọi cạnh/góc, hỗ trợ phóng to và tự thu nhỏ toàn bộ bố cục.
+- Có công tắc khởi động cùng Windows ngay trong app; phiên tự khởi động chạy ẩn dưới tray.
+- Color Boost tự áp dụng lại sau mỗi lần đổi video và tiếp tục được giữ ổn định nếu MPV khởi tạo lại decoder/renderer.
+- Chế độ hồ sơ lấy video đang phát trực tiếp từ MPV, tránh áp nhầm `NONE` do state hoặc WallpaperLayout cũ.
 - Nút X thu ứng dụng xuống tray; menu tray có lệnh thoát hoàn toàn.
 - Auto Wallpaper có khóa tắt riêng, không bị watchdog tự bật lại.
 - Shuffle bag tránh lặp video trong cùng chu kỳ.
@@ -99,10 +103,10 @@ Kết quả nằm tại `dist\WallpaperControlSetup.exe`.
 
 ## Kiểm tra file phát hành
 
-SHA-256 của bản `2.4.1.0` hiện tại:
+SHA-256 của bản `2.6.1.0` hiện tại:
 
 ```text
-A9FF020A2D0C6E1A2E2CE9CC9357F42F68D79E22482F4264A0CD174C6594D026
+E2DE9DCA50AFEE45E59A769C118D87AD3E7E03A50A0B866313C705386CCF85CA
 ```
 
 ## Tham khảo Lively chính thức

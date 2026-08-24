@@ -99,6 +99,7 @@ $dvcDarkFadeMilliseconds = 110
 $newVideoPrerollMilliseconds = 250
 $mpvIpcRetryCount = 12
 $mpvIpcRetryDelayMilliseconds = 250
+$colorRefreshIntervalMilliseconds = 1000
 $fillThresholdWidth = 1920
 $fillThresholdHeight = 1200
 $sixteenByNineAspect = 16.0 / 9.0
@@ -674,26 +675,25 @@ function Close-MpvIpcConnections($connections) {
 }
 
 function Set-MpvBrightness($connections, [int]$value) {
-    $message = '{"command":["set_property","brightness",' + $value + ']}'
-    foreach ($connection in @($connections)) {
-        try {
-            $connection.Writer.WriteLine($message)
-            [void]$connection.Reader.ReadLine()
-        }
-        catch { }
-    }
+    try { Send-MpvCommand $connections @('set_property', 'brightness', $value) }
+    catch { }
 }
 
 function Send-MpvCommand($connections, [object[]]$command) {
-    $message = @{ command = $command } | ConvertTo-Json -Compress -Depth 10
+    $script:mpvRequestSequence++
+    $requestId = [int]$script:mpvRequestSequence
+    $message = @{ command = $command; request_id = $requestId } | ConvertTo-Json -Compress -Depth 10
     foreach ($connection in @($connections)) {
         $connection.Writer.WriteLine($message)
-        $responseText = $connection.Reader.ReadLine()
-        if ($responseText) {
+        do {
+            $responseText = $connection.Reader.ReadLine()
+            if (-not $responseText) { throw 'MPV IPC connection closed before a response was received.' }
             $response = $responseText | ConvertFrom-Json
-            if ($response.error -and $response.error -ne 'success') {
-                throw "MPV IPC command failed: $($response.error)"
-            }
+            # loadfile emits asynchronous start-file/file-loaded events. Ignore
+            # those and wait for the response belonging to this exact command.
+        } while ([int]$response.request_id -ne $requestId)
+        if ($response.error -and $response.error -ne 'success') {
+            throw "MPV IPC command failed: $($response.error)"
         }
     }
 }
@@ -713,11 +713,11 @@ function Set-MpvWallpaperColor($connections, $filter, [bool]$writeLog = $true) {
     }
 }
 
-function Set-RunningMpvWallpaperColor($filter) {
+function Set-RunningMpvWallpaperColor($filter, [bool]$writeLog = $true) {
     $connections = @(Open-MpvIpcConnections)
     if ($connections.Count -eq 0) { return $false }
     try {
-        Set-MpvWallpaperColor $connections $filter $true
+        Set-MpvWallpaperColor $connections $filter $writeLog
         return $true
     }
     finally {
@@ -822,6 +822,10 @@ function Invoke-SeamlessMpvTransition([string]$videoPath, [int]$scalerValue, $fi
         Set-MpvWallpaperColor $connections $filter $true
         Invoke-MpvFadeOnConnections $connections -100 $dvcFadeThreshold $dvcDarkFadeMilliseconds
         Invoke-MpvFadeOnConnections $connections $dvcFadeThreshold 0 $dvcVisibleFadeMilliseconds
+        # Some decoders finish file initialization after the first visible
+        # frame and restore MPV's neutral saturation. Enforce the selected
+        # profile again after fade-in, when the new video is fully active.
+        Set-MpvWallpaperColor $connections $filter $false
         Write-Log "Seamless MPV load completed using $(@($connections).Count) persistent IPC connection(s)."
         return $true
     }
@@ -952,6 +956,7 @@ try {
         $remainingSlotMilliseconds = [Math]::Max(0, ($slotDurationSeconds * 1000) - $slotClock.ElapsedMilliseconds)
         $activeElapsedMilliseconds = 0
         $scanElapsedMilliseconds = 0
+        $colorRefreshElapsedMilliseconds = 0
         while ($activeElapsedMilliseconds -lt $remainingSlotMilliseconds) {
             if (Test-Path -LiteralPath $disabledMarkerPath) { break serviceLoop }
             $latestControlSettings = Get-WallpaperControlSettings
@@ -972,6 +977,13 @@ try {
                 $activeElapsedMilliseconds += $sleepForMilliseconds
             }
             $scanElapsedMilliseconds += $sleepForMilliseconds
+            $colorRefreshElapsedMilliseconds += $sleepForMilliseconds
+            if ($colorRefreshElapsedMilliseconds -ge $colorRefreshIntervalMilliseconds) {
+                # Keep the chosen filter authoritative. MPV/Lively can reset a
+                # video property during a delayed decoder or renderer reinit.
+                [void](Set-RunningMpvWallpaperColor $activeVideoFilter $false)
+                $colorRefreshElapsedMilliseconds = 0
+            }
             if ($scanElapsedMilliseconds -ge ($scanIntervalSeconds * 1000)) {
                 [void](Import-NewVideos)
                 $scanElapsedMilliseconds = 0

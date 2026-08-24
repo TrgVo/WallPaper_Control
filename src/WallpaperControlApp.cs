@@ -19,8 +19,8 @@ using Microsoft.Win32.SafeHandles;
 [assembly: AssemblyDescription("Lively Wallpaper automation and safe MPV color control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.4.1.0")]
-[assembly: AssemblyFileVersion("2.4.1.0")]
+[assembly: AssemblyVersion("2.6.1.0")]
+[assembly: AssemblyFileVersion("2.6.1.0")]
 
 internal static class Theme
 {
@@ -187,7 +187,17 @@ internal sealed class RogColorTable : ProfessionalColorTable
 internal static class NativeMethods
 {
     public const int WM_NCLBUTTONDOWN = 0xA1;
+    public const int WM_NCHITTEST = 0x84;
     public const int HTCAPTION = 0x2;
+    public const int HTCLIENT = 0x1;
+    public const int HTLEFT = 10;
+    public const int HTRIGHT = 11;
+    public const int HTTOP = 12;
+    public const int HTTOPLEFT = 13;
+    public const int HTTOPRIGHT = 14;
+    public const int HTBOTTOM = 15;
+    public const int HTBOTTOMLEFT = 16;
+    public const int HTBOTTOMRIGHT = 17;
 
     [DllImport("user32.dll")]
     public static extern bool ReleaseCapture();
@@ -220,6 +230,14 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetFileInformationByHandle(SafeFileHandle fileHandle, out ByHandleFileInformation fileInformation);
+}
+
+internal sealed class ResponsiveLayoutSnapshot
+{
+    public Rectangle Bounds;
+    public string FontFamily;
+    public float FontSize;
+    public FontStyle FontStyle;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -300,6 +318,28 @@ internal interface IPropertyStore
 internal static class ShellIntegration
 {
     public const string AppUserModelId = "WallpaperControl.Gaming.Desktop";
+    private const string StartupShortcutName = "Wallpaper Control.lnk";
+
+    public static string StartupShortcutPath
+    {
+        get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), StartupShortcutName); }
+    }
+
+    public static bool IsStartupEnabled()
+    {
+        try { return File.Exists(StartupShortcutPath); }
+        catch { return false; }
+    }
+
+    public static void SetStartupEnabled(bool enabled)
+    {
+        if (enabled)
+        {
+            CreateShortcut(StartupShortcutPath, Application.ExecutablePath, "--startup");
+            return;
+        }
+        if (File.Exists(StartupShortcutPath)) File.Delete(StartupShortcutPath);
+    }
 
     public static void EnsureInstalled()
     {
@@ -308,8 +348,8 @@ internal static class ShellIntegration
             string exe = Application.ExecutablePath;
             string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Wallpaper Control.lnk");
             string desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Wallpaper Control.lnk");
-            CreateShortcut(startMenu, exe);
-            CreateShortcut(desktop, exe);
+            CreateShortcut(startMenu, exe, null);
+            CreateShortcut(desktop, exe, null);
 
             using (var appPath = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\WallpaperControl.exe"))
             {
@@ -327,7 +367,7 @@ internal static class ShellIntegration
         catch { }
     }
 
-    private static void CreateShortcut(string shortcutPath, string exe)
+    private static void CreateShortcut(string shortcutPath, string exe, string arguments)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(shortcutPath));
         var link = (IShellLinkW)new ShellLinkCom();
@@ -336,6 +376,7 @@ internal static class ShellIntegration
         link.SetDescription("Điều khiển hình nền động Lively");
         link.SetIconLocation(exe, 0);
         link.SetShowCmd(1);
+        if (!string.IsNullOrEmpty(arguments)) link.SetArguments(arguments);
 
         var key = new PropertyKey(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
         var value = PropVariant.FromString(AppUserModelId);
@@ -356,6 +397,9 @@ internal static class ShellIntegration
 
 internal sealed class WallpaperControlForm : Form
 {
+    private const int DesignWidth = 980;
+    private const int DesignHeight = 760;
+    private const int ResizeGrip = 9;
     private static readonly string ApplicationRoot = Path.GetDirectoryName(Application.ExecutablePath);
     internal static readonly string AutomationRoot = Path.Combine(ApplicationRoot, "Automation");
     private static readonly string SettingsPath = Path.Combine(AutomationRoot, "WallpaperControl.ini");
@@ -386,22 +430,35 @@ internal sealed class WallpaperControlForm : Form
     private readonly RogSlider saturationSlider = new RogSlider();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
     private readonly NotifyIcon trayIcon = new NotifyIcon();
+    private readonly CheckBox startupCheck = new CheckBox();
+    private readonly Label startupState = new Label();
+    private readonly Dictionary<Control, ResponsiveLayoutSnapshot> responsiveLayout = new Dictionary<Control, ResponsiveLayoutSnapshot>();
+    private readonly Dictionary<string, Font> responsiveFonts = new Dictionary<string, Font>();
+    private readonly bool startHidden;
+    private Button maximizeButton;
     private WallpaperSettings settings;
     private bool exitRequested;
+    private bool initialVisibilityHandled;
+    private bool updatingStartupControl;
     private volatile bool showRequested;
     private DateTime nextServiceRestartUtc = DateTime.MinValue;
     private DateTime nextStorageSyncUtc = DateTime.MinValue;
     private volatile bool storageSyncRunning;
     private string lastStorageSummary = "Đang kiểm tra hard-link và dung lượng...";
+    private string lastObservedVideoName;
+    private bool responsiveLayoutCaptured;
 
-    public WallpaperControlForm(string userActivationSignalPath)
+    public WallpaperControlForm(string userActivationSignalPath, bool launchAtStartup)
     {
         activationSignalPath = userActivationSignalPath;
+        startHidden = launchAtStartup;
         settings = LoadSettings();
         BuildInterface();
         LoadSettingsIntoControls();
         RefreshStatus();
+        UpdateStartupStatus();
         Shown += delegate { ShellIntegration.EnsureInstalled(); };
+        if (startHidden) ShellIntegration.EnsureInstalled();
         statusTimer.Interval = 1000;
         statusTimer.Tick += delegate {
             if (DateTime.UtcNow >= nextStorageSyncUtc) StartStorageSync();
@@ -417,11 +474,48 @@ internal sealed class WallpaperControlForm : Form
         StartStorageSync();
     }
 
+    protected override void SetVisibleCore(bool value)
+    {
+        if (startHidden && !initialVisibilityHandled && value)
+        {
+            initialVisibilityHandled = true;
+            base.SetVisibleCore(false);
+            return;
+        }
+        base.SetVisibleCore(value);
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        base.WndProc(ref message);
+        if (message.Msg != NativeMethods.WM_NCHITTEST || WindowState != FormWindowState.Normal ||
+            (int)message.Result != NativeMethods.HTCLIENT) return;
+
+        long position = message.LParam.ToInt64();
+        int screenX = unchecked((short)(position & 0xFFFF));
+        int screenY = unchecked((short)((position >> 16) & 0xFFFF));
+        Point clientPoint = PointToClient(new Point(screenX, screenY));
+        bool left = clientPoint.X <= ResizeGrip;
+        bool right = clientPoint.X >= ClientSize.Width - ResizeGrip;
+        bool top = clientPoint.Y <= ResizeGrip;
+        bool bottom = clientPoint.Y >= ClientSize.Height - ResizeGrip;
+
+        if (left && top) message.Result = (IntPtr)NativeMethods.HTTOPLEFT;
+        else if (right && top) message.Result = (IntPtr)NativeMethods.HTTOPRIGHT;
+        else if (left && bottom) message.Result = (IntPtr)NativeMethods.HTBOTTOMLEFT;
+        else if (right && bottom) message.Result = (IntPtr)NativeMethods.HTBOTTOMRIGHT;
+        else if (left) message.Result = (IntPtr)NativeMethods.HTLEFT;
+        else if (right) message.Result = (IntPtr)NativeMethods.HTRIGHT;
+        else if (top) message.Result = (IntPtr)NativeMethods.HTTOP;
+        else if (bottom) message.Result = (IntPtr)NativeMethods.HTBOTTOM;
+    }
+
     private void BuildInterface()
     {
         Text = "Wallpaper Control";
-        ClientSize = new Size(980, 760);
-        MinimumSize = MaximumSize = Size;
+        ClientSize = new Size(DesignWidth, DesignHeight);
+        MinimumSize = new Size(760, 590);
+        MaximumSize = Size.Empty;
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.None;
         BackColor = Theme.Background;
@@ -441,16 +535,20 @@ internal sealed class WallpaperControlForm : Form
         subtitle.MouseDown += DragWindow;
         titleBar.Controls.Add(subtitle);
         topStatus.TextAlign = ContentAlignment.MiddleCenter;
-        topStatus.Location = new Point(700, 18);
+        topStatus.Location = new Point(660, 18);
         topStatus.Size = new Size(160, 27);
         topStatus.BackColor = Color.FromArgb(31, 39, 47);
         topStatus.ForeColor = Theme.Green;
         topStatus.Font = new Font("Segoe UI Semibold", 8.5F);
         titleBar.Controls.Add(topStatus);
 
-        var minimize = MakeWindowButton("—", 884);
+        var minimize = MakeWindowButton("—", 836);
         minimize.Click += delegate { WindowState = FormWindowState.Minimized; };
         titleBar.Controls.Add(minimize);
+        maximizeButton = MakeWindowButton("□", 884);
+        maximizeButton.Font = new Font("Segoe UI Symbol", 11F);
+        maximizeButton.Click += delegate { ToggleMaximize(); };
+        titleBar.Controls.Add(maximizeButton);
         var close = MakeWindowButton("×", 932);
         close.Font = new Font("Segoe UI", 17F);
         close.Click += delegate { HideToTray(); };
@@ -470,11 +568,26 @@ internal sealed class WallpaperControlForm : Form
         sidebar.Controls.Add(MakeLabel("▣   AUTO WALLPAPER", 25, 305, 175, 24, Theme.Muted, 9F, FontStyle.Bold));
         sidebar.Controls.Add(MakeLabel("◆   MÀU HÌNH NỀN", 25, 350, 175, 24, Theme.Muted, 9F, FontStyle.Bold));
 
+        sidebar.Controls.Add(MakeLabel("WINDOWS", 24, 408, 170, 20, Theme.Muted, 8F, FontStyle.Bold));
+        startupCheck.Text = "Khởi động cùng Windows";
+        startupCheck.Location = new Point(24, 435);
+        startupCheck.Size = new Size(174, 26);
+        startupCheck.ForeColor = Theme.Text;
+        startupCheck.BackColor = Color.Transparent;
+        startupCheck.FlatStyle = FlatStyle.Flat;
+        startupCheck.Cursor = Cursors.Hand;
+        startupCheck.CheckedChanged += delegate { ChangeStartupSetting(); };
+        sidebar.Controls.Add(startupCheck);
+        startupState.Location = new Point(44, 463);
+        startupState.Size = new Size(154, 42);
+        startupState.Font = new Font("Segoe UI", 8F);
+        sidebar.Controls.Add(startupState);
+
         var lockPanel = new Panel { Location = new Point(18, 570), Size = new Size(182, 72), BackColor = Color.FromArgb(17, 22, 28) };
         lockPanel.Controls.Add(MakeLabel("NVIDIA DRIVER", 14, 10, 150, 18, Theme.Muted, 8F, FontStyle.Bold));
         lockPanel.Controls.Add(MakeLabel("●  USER CONTROLLED", 14, 33, 160, 23, Theme.Green, 8.5F, FontStyle.Bold));
         sidebar.Controls.Add(lockPanel);
-        sidebar.Controls.Add(MakeLabel("v2.4.1  ·  LIVE STATUS", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
+        sidebar.Controls.Add(MakeLabel("v2.6.1  ·  LIVE STATUS", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
         Controls.Add(sidebar);
 
         Controls.Add(MakeLabel("SYSTEM DASHBOARD", 252, 91, 350, 34, Theme.Text, 19F, FontStyle.Bold));
@@ -605,7 +718,84 @@ internal sealed class WallpaperControlForm : Form
 
         BuildTrayMenu();
         FormClosing += OnFormClosing;
-        FormClosed += delegate { trayIcon.Visible = false; trayIcon.Dispose(); };
+        FormClosed += delegate {
+            trayIcon.Visible = false;
+            trayIcon.Dispose();
+            foreach (Font scaledFont in responsiveFonts.Values) scaledFont.Dispose();
+            responsiveFonts.Clear();
+        };
+        CaptureResponsiveLayout(this);
+        responsiveLayoutCaptured = true;
+        Resize += delegate { ApplyResponsiveLayout(); };
+        ApplyResponsiveLayout();
+    }
+
+    private void CaptureResponsiveLayout(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            responsiveLayout[child] = new ResponsiveLayoutSnapshot {
+                Bounds = child.Bounds,
+                FontFamily = child.Font.FontFamily.Name,
+                FontSize = child.Font.Size,
+                FontStyle = child.Font.Style
+            };
+            CaptureResponsiveLayout(child);
+        }
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        if (!responsiveLayoutCaptured || WindowState == FormWindowState.Minimized || ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
+        float scale = Math.Min(ClientSize.Width / (float)DesignWidth, ClientSize.Height / (float)DesignHeight);
+        scale = Math.Max(0.70F, Math.Min(1.15F, scale));
+        int contentWidth = (int)Math.Round(DesignWidth * scale);
+        int contentHeight = (int)Math.Round(DesignHeight * scale);
+        int offsetX = Math.Max(0, (ClientSize.Width - contentWidth) / 2);
+        int offsetY = Math.Max(0, (ClientSize.Height - contentHeight) / 2);
+
+        SuspendLayout();
+        ScaleControlTree(this, scale, offsetX, offsetY);
+        if (maximizeButton != null) maximizeButton.Text = WindowState == FormWindowState.Maximized ? "❐" : "□";
+        ResumeLayout(true);
+    }
+
+    private void ScaleControlTree(Control parent, float scale, int rootOffsetX, int rootOffsetY)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            ResponsiveLayoutSnapshot snapshot;
+            if (!responsiveLayout.TryGetValue(child, out snapshot)) continue;
+            int offsetX = parent == this ? rootOffsetX : 0;
+            int offsetY = parent == this ? rootOffsetY : 0;
+            int x = offsetX + (int)Math.Round(snapshot.Bounds.X * scale);
+            int y = offsetY + (int)Math.Round(snapshot.Bounds.Y * scale);
+            int width = Math.Max(1, (int)Math.Round(snapshot.Bounds.Width * scale));
+            int height = Math.Max(1, (int)Math.Round(snapshot.Bounds.Height * scale));
+            if (child.Dock == DockStyle.None) child.Bounds = new Rectangle(x, y, width, height);
+            else if (child.Dock == DockStyle.Left || child.Dock == DockStyle.Right) child.Width = width;
+            else if (child.Dock == DockStyle.Top || child.Dock == DockStyle.Bottom) child.Height = height;
+
+            float fontSize = (float)(Math.Round(Math.Max(6F, snapshot.FontSize * scale) * 4.0) / 4.0);
+            if (Math.Abs(child.Font.Size - fontSize) > 0.15F)
+            {
+                string fontKey = snapshot.FontFamily + "|" + fontSize.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + "|" + (int)snapshot.FontStyle;
+                Font scaledFont;
+                if (!responsiveFonts.TryGetValue(fontKey, out scaledFont))
+                {
+                    scaledFont = new Font(snapshot.FontFamily, fontSize, snapshot.FontStyle, GraphicsUnit.Point);
+                    responsiveFonts[fontKey] = scaledFont;
+                }
+                child.Font = scaledFont;
+            }
+            ScaleControlTree(child, scale, 0, 0);
+        }
+    }
+
+    private void ToggleMaximize()
+    {
+        WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+        ApplyResponsiveLayout();
     }
 
     private void BuildTrayMenu()
@@ -658,6 +848,12 @@ internal sealed class WallpaperControlForm : Form
     private void DragWindow(object sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
+        if (e.Clicks >= 2)
+        {
+            ToggleMaximize();
+            return;
+        }
+        if (WindowState == FormWindowState.Maximized) return;
         NativeMethods.ReleaseCapture();
         NativeMethods.SendMessage(Handle, NativeMethods.WM_NCLBUTTONDOWN, NativeMethods.HTCAPTION, 0);
     }
@@ -680,6 +876,32 @@ internal sealed class WallpaperControlForm : Form
         saturationSlider.Value = Math.Max(0, Math.Min(100, settings.Saturation));
         UpdateColorPreview();
         UpdateColorControls();
+    }
+
+    private void UpdateStartupStatus()
+    {
+        bool enabled = ShellIntegration.IsStartupEnabled();
+        updatingStartupControl = true;
+        startupCheck.Checked = enabled;
+        updatingStartupControl = false;
+        startupState.Text = enabled ? "Sẽ tự chạy ẩn ở khay hệ thống" : "App không tự chạy khi đăng nhập";
+        startupState.ForeColor = enabled ? Theme.Green : Theme.Muted;
+    }
+
+    private void ChangeStartupSetting()
+    {
+        if (updatingStartupControl) return;
+        try
+        {
+            ShellIntegration.SetStartupEnabled(startupCheck.Checked);
+            UpdateStartupStatus();
+        }
+        catch (Exception ex)
+        {
+            UpdateStartupStatus();
+            MessageBox.Show("Không thể thay đổi thiết lập khởi động cùng Windows:\n" + ex.Message,
+                "Wallpaper Control", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private static int CalculateMpvBoost(int intensity, int saturation)
@@ -962,8 +1184,16 @@ internal sealed class WallpaperControlForm : Form
 
     private static string ReadCurrentVideoName()
     {
+        string shuffleVideo = ReadShuffleStateVideoName();
+        if (Process.GetProcessesByName("LivelyShuffleLauncher").Length > 0 && !string.IsNullOrEmpty(shuffleVideo))
+            return shuffleVideo;
         string livelyVideo = ReadCurrentVideoFromLively();
         if (!string.IsNullOrEmpty(livelyVideo)) return livelyVideo;
+        return shuffleVideo;
+    }
+
+    private static string ReadShuffleStateVideoName()
+    {
         string statePath = Path.Combine(AutomationRoot, "shuffle-state.json");
         try
         {
@@ -1014,6 +1244,12 @@ internal sealed class WallpaperControlForm : Form
             currentVideoName.Text = "Video: chưa xác định";
             currentVideoConfig.Text = "Cấu hình thực tế: chưa có trạng thái phát từ Auto Wallpaper";
             return;
+        }
+
+        if (!string.Equals(lastObservedVideoName, videoName, StringComparison.OrdinalIgnoreCase))
+        {
+            lastObservedVideoName = videoName;
+            RunApplyHelper(8, 250);
         }
 
         currentVideoName.Text = "Video: " + videoName;
@@ -1222,11 +1458,13 @@ internal sealed class WallpaperControlForm : Form
         }
     }
 
-    private static void RunApplyHelper()
+    private static void RunApplyHelper(int retryCount = 1, int retryDelayMilliseconds = 250)
     {
         try
         {
-            var start = new ProcessStartInfo("powershell.exe", "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + ApplyHelperPath + "\" -Silent") {
+            string arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + ApplyHelperPath +
+                "\" -Silent -RetryCount " + Math.Max(1, retryCount) + " -RetryDelayMilliseconds " + Math.Max(50, retryDelayMilliseconds);
+            var start = new ProcessStartInfo("powershell.exe", arguments) {
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
@@ -1319,6 +1557,10 @@ internal static class Program
             return;
         }
 
+        bool launchAtStartup = false;
+        foreach (string argument in args)
+            if (string.Equals(argument, "--startup", StringComparison.OrdinalIgnoreCase)) launchAtStartup = true;
+
         string userScope = GetUserScopeKey();
         string mutexName = @"Local\WallpaperControlSingleInstance_" + userScope;
         string pipeName = "WallpaperControlActivation_" + userScope;
@@ -1328,6 +1570,7 @@ internal static class Program
         {
             if (!firstInstance)
             {
+                if (launchAtStartup) return;
                 try { File.WriteAllText(activationSignalPath, "show", new UTF8Encoding(false)); } catch { }
                 try
                 {
@@ -1353,7 +1596,7 @@ internal static class Program
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             try { if (File.Exists(activationSignalPath)) File.Delete(activationSignalPath); } catch { }
-            var form = new WallpaperControlForm(activationSignalPath);
+            var form = new WallpaperControlForm(activationSignalPath, launchAtStartup);
             var activationThread = new Thread(delegate()
             {
                 while (!form.IsDisposed)

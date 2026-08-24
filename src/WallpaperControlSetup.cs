@@ -14,8 +14,8 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyDescription("Portable one-file setup for Lively Wallpaper Control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.4.1.0")]
-[assembly: AssemblyFileVersion("2.4.1.0")]
+[assembly: AssemblyVersion("2.6.1.0")]
+[assembly: AssemblyFileVersion("2.6.1.0")]
 
 internal sealed class LivelyDetection
 {
@@ -204,7 +204,7 @@ internal static class PortableInstaller
             CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Wallpaper Control.lnk"), exe);
             CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Wallpaper Control.lnk"), exe);
             string startup = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Wallpaper Control.lnk");
-            if (createStartup) CreateShortcut(startup, exe); else TryDelete(startup);
+            if (createStartup) CreateShortcut(startup, exe, "--startup"); else TryDelete(startup);
         }
     }
 
@@ -260,7 +260,7 @@ internal static class PortableInstaller
         }
     }
 
-    private static void CreateShortcut(string path, string exe)
+    private static void CreateShortcut(string path, string exe, string arguments = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         Type shellType = Type.GetTypeFromProgID("WScript.Shell");
@@ -271,6 +271,8 @@ internal static class PortableInstaller
         linkType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(exe) });
         linkType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "Điều khiển Lively Wallpaper tự động" });
         linkType.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { exe + ",0" });
+        if (!string.IsNullOrEmpty(arguments))
+            linkType.InvokeMember("Arguments", BindingFlags.SetProperty, null, shortcut, new object[] { arguments });
         linkType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
     }
 
@@ -314,7 +316,8 @@ internal sealed class SetupForm : Form
         Controls.Add(details);
 
         startup.Text = "Khởi động Wallpaper Control cùng Windows";
-        startup.Checked = true;
+        string startupPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Wallpaper Control.lnk");
+        startup.Checked = !Directory.Exists(PortableInstaller.InstallRoot) || File.Exists(startupPath);
         startup.Location = new Point(34, 304);
         startup.Size = new Size(380, 28);
         startup.ForeColor = Color.FromArgb(230, 232, 239);
