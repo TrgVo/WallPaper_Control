@@ -19,8 +19,8 @@ using Microsoft.Win32.SafeHandles;
 [assembly: AssemblyDescription("Lively Wallpaper automation and safe MPV color control")]
 [assembly: AssemblyProduct("Wallpaper Control")]
 [assembly: AssemblyCompany("Wallpaper Control Community")]
-[assembly: AssemblyVersion("2.6.1.0")]
-[assembly: AssemblyFileVersion("2.6.1.0")]
+[assembly: AssemblyVersion("2.6.2.0")]
+[assembly: AssemblyFileVersion("2.6.2.0")]
 
 internal static class Theme
 {
@@ -435,9 +435,12 @@ internal sealed class WallpaperControlForm : Form
     private readonly Dictionary<Control, ResponsiveLayoutSnapshot> responsiveLayout = new Dictionary<Control, ResponsiveLayoutSnapshot>();
     private readonly Dictionary<string, Font> responsiveFonts = new Dictionary<string, Font>();
     private readonly bool startHidden;
+    private ContextMenuStrip trayMenu;
     private Button maximizeButton;
     private WallpaperSettings settings;
     private bool exitRequested;
+    private volatile bool shutdownStarted;
+    private bool disposableResourcesReleased;
     private bool initialVisibilityHandled;
     private bool updatingStartupControl;
     private volatile bool showRequested;
@@ -461,6 +464,7 @@ internal sealed class WallpaperControlForm : Form
         if (startHidden) ShellIntegration.EnsureInstalled();
         statusTimer.Interval = 1000;
         statusTimer.Tick += delegate {
+            if (!CanInteractWithForm) return;
             if (DateTime.UtcNow >= nextStorageSyncUtc) StartStorageSync();
             if (showRequested || File.Exists(activationSignalPath))
             {
@@ -472,6 +476,35 @@ internal sealed class WallpaperControlForm : Form
         };
         statusTimer.Start();
         StartStorageSync();
+    }
+
+    private bool CanInteractWithForm
+    {
+        get { return !shutdownStarted && !exitRequested && !Disposing && !IsDisposed; }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        shutdownStarted = true;
+        if (disposing && !disposableResourcesReleased)
+        {
+            disposableResourcesReleased = true;
+            statusTimer.Stop();
+            statusTimer.Dispose();
+            showRequested = false;
+            try { trayIcon.Visible = false; } catch { }
+            try { trayIcon.ContextMenuStrip = null; } catch { }
+            try { trayIcon.Dispose(); } catch { }
+            if (trayMenu != null)
+            {
+                try { trayMenu.Close(); } catch { }
+                trayMenu.Dispose();
+                trayMenu = null;
+            }
+            foreach (Font scaledFont in responsiveFonts.Values) scaledFont.Dispose();
+            responsiveFonts.Clear();
+        }
+        base.Dispose(disposing);
     }
 
     protected override void SetVisibleCore(bool value)
@@ -587,7 +620,7 @@ internal sealed class WallpaperControlForm : Form
         lockPanel.Controls.Add(MakeLabel("NVIDIA DRIVER", 14, 10, 150, 18, Theme.Muted, 8F, FontStyle.Bold));
         lockPanel.Controls.Add(MakeLabel("●  USER CONTROLLED", 14, 33, 160, 23, Theme.Green, 8.5F, FontStyle.Bold));
         sidebar.Controls.Add(lockPanel);
-        sidebar.Controls.Add(MakeLabel("v2.6.1  ·  LIVE STATUS", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
+        sidebar.Controls.Add(MakeLabel("v2.6.2  ·  LIVE STATUS", 31, 662, 170, 18, Color.FromArgb(91, 98, 116), 7.5F, FontStyle.Bold));
         Controls.Add(sidebar);
 
         Controls.Add(MakeLabel("SYSTEM DASHBOARD", 252, 91, 350, 34, Theme.Text, 19F, FontStyle.Bold));
@@ -718,12 +751,6 @@ internal sealed class WallpaperControlForm : Form
 
         BuildTrayMenu();
         FormClosing += OnFormClosing;
-        FormClosed += delegate {
-            trayIcon.Visible = false;
-            trayIcon.Dispose();
-            foreach (Font scaledFont in responsiveFonts.Values) scaledFont.Dispose();
-            responsiveFonts.Clear();
-        };
         CaptureResponsiveLayout(this);
         responsiveLayoutCaptured = true;
         Resize += delegate { ApplyResponsiveLayout(); };
@@ -800,20 +827,36 @@ internal sealed class WallpaperControlForm : Form
 
     private void BuildTrayMenu()
     {
-        var menu = new ContextMenuStrip();
-        menu.BackColor = Theme.CardAlt;
-        menu.ForeColor = Theme.Text;
-        menu.Renderer = new ToolStripProfessionalRenderer(new RogColorTable());
-        menu.Items.Add("Mở Wallpaper Control", null, delegate { ShowFromTray(); });
-        menu.Items.Add("Bật / tắt Auto Wallpaper", null, delegate { ToggleAutoWallpaper(); });
-        menu.Items.Add("Đặt lại màu hình nền", null, delegate { ResetColor(); });
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Thoát ứng dụng", null, delegate { exitRequested = true; Close(); });
+        trayMenu = new ContextMenuStrip();
+        trayMenu.BackColor = Theme.CardAlt;
+        trayMenu.ForeColor = Theme.Text;
+        trayMenu.Renderer = new ToolStripProfessionalRenderer(new RogColorTable());
+        trayMenu.Items.Add("Mở Wallpaper Control", null, delegate { ShowFromTray(); });
+        trayMenu.Items.Add("Bật / tắt Auto Wallpaper", null, delegate { RunTrayAction(ToggleAutoWallpaper); });
+        trayMenu.Items.Add("Đặt lại màu hình nền", null, delegate { RunTrayAction(ResetColor); });
+        trayMenu.Items.Add(new ToolStripSeparator());
+        trayMenu.Items.Add("Thoát ứng dụng", null, delegate { ExitFromTray(); });
         trayIcon.Icon = LoadAppIcon();
         trayIcon.Text = "Wallpaper Control · MPV color only";
-        trayIcon.ContextMenuStrip = menu;
+        trayIcon.ContextMenuStrip = trayMenu;
         trayIcon.Visible = true;
         trayIcon.DoubleClick += delegate { ShowFromTray(); };
+    }
+
+    private void RunTrayAction(Action action)
+    {
+        if (!CanInteractWithForm) return;
+        try { action(); }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { if (CanInteractWithForm) throw; }
+    }
+
+    private void ExitFromTray()
+    {
+        if (!CanInteractWithForm) return;
+        exitRequested = true;
+        PrepareForShutdown();
+        Close();
     }
 
     private static Label MakeLabel(string text, int x, int y, int width, int height, Color color, float size, FontStyle style)
@@ -1478,17 +1521,33 @@ internal sealed class WallpaperControlForm : Form
 
     public void ShowFromTray()
     {
-        trayIcon.Visible = true;
-        ShowInTaskbar = true;
-        Show();
-        WindowState = FormWindowState.Normal;
-        Activate();
-        BringToFront();
-        RefreshStatus();
+        if (!CanInteractWithForm) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(new MethodInvoker(ShowFromTray)); }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+            return;
+        }
+
+        if (!CanInteractWithForm) return;
+        try
+        {
+            trayIcon.Visible = true;
+            ShowInTaskbar = true;
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
+            RefreshStatus();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { if (CanInteractWithForm) throw; }
     }
 
     private void HideToTray()
     {
+        if (!CanInteractWithForm) return;
         ShowInTaskbar = false;
         Hide();
         trayIcon.Visible = true;
@@ -1496,7 +1555,23 @@ internal sealed class WallpaperControlForm : Form
 
     public void RequestShowFromAnotherInstance()
     {
+        if (!CanInteractWithForm) return;
         showRequested = true;
+    }
+
+    private void PrepareForShutdown()
+    {
+        if (shutdownStarted) return;
+        shutdownStarted = true;
+        showRequested = false;
+        statusTimer.Stop();
+        TryDelete(activationSignalPath);
+        if (trayMenu != null)
+        {
+            trayMenu.Enabled = false;
+            try { trayMenu.Close(); } catch { }
+        }
+        try { trayIcon.Visible = false; } catch { }
     }
 
     private void OnFormClosing(object sender, FormClosingEventArgs e)
@@ -1510,7 +1585,8 @@ internal sealed class WallpaperControlForm : Form
             HideToTray();
             return;
         }
-        trayIcon.Visible = false;
+        exitRequested = true;
+        PrepareForShutdown();
     }
 
     private static Image LoadLogo()

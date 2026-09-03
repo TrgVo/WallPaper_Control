@@ -19,7 +19,7 @@ Bộ cài không cần quyền Administrator. Ứng dụng được cài vào:
 
 Setup tự tạo shortcut Desktop, Start Menu và tùy chọn khởi động cùng Windows. Sau khi cài, có thể bật/tắt lại tùy chọn này ngay trong app. Khi được Windows gọi lúc đăng nhập, Wallpaper Control chạy ẩn dưới khay hệ thống và tự nạp các chức năng nền mà không hiện cửa sổ. Chạy lại cùng file Setup để cập nhật hoặc gỡ Wallpaper Control. Thao tác gỡ không xóa video hay thư viện Lively.
 
-> File hiện chưa được ký bằng chứng thư thương mại nên Windows SmartScreen có thể hiển thị `Unknown publisher`.
+> File hiện chưa được ký bằng chứng thư thương mại nên Windows SmartScreen có thể hiển thị `Unknown publisher`. Nếu Smart App Control đang ở chế độ `On`, Windows có thể chặn hoàn toàn một bản build mới chưa có uy tín theo hash; chế độ này không hỗ trợ ngoại lệ riêng cho từng app, vì vậy bản phát hành cần chữ ký từ nhà cung cấp chứng thư được Windows tin cậy.
 
 ## Tự phát hiện Lively
 
@@ -66,6 +66,7 @@ Wallpaper Control vẫn tương thích với cách phân loại bằng hard link
 - Có công tắc khởi động cùng Windows ngay trong app; phiên tự khởi động chạy ẩn dưới tray.
 - Color Boost tự áp dụng lại sau mỗi lần đổi video và tiếp tục được giữ ổn định nếu MPV khởi tạo lại decoder/renderer.
 - Chế độ hồ sơ lấy video đang phát trực tiếp từ MPV, tránh áp nhầm `NONE` do state hoặc WallpaperLayout cũ.
+- Menu khay và yêu cầu mở cửa sổ đến muộn sẽ được bỏ qua an toàn khi app đang thoát, tránh lỗi `ObjectDisposedException` sau khi Windows hoặc driver khởi tạo lại desktop.
 - Nút X thu ứng dụng xuống tray; menu tray có lệnh thoát hoàn toàn.
 - Auto Wallpaper có khóa tắt riêng, không bị watchdog tự bật lại.
 - Shuffle bag tránh lặp video trong cùng chu kỳ.
@@ -103,10 +104,10 @@ Kết quả nằm tại `dist\WallpaperControlSetup.exe`.
 
 ## Kiểm tra file phát hành
 
-SHA-256 của bản `2.6.1.0` hiện tại:
+SHA-256 của bản `2.6.2.0` hiện tại:
 
 ```text
-E2DE9DCA50AFEE45E59A769C118D87AD3E7E03A50A0B866313C705386CCF85CA
+409D7B272A9F6BFEC1A6754656110FC4871D9B0CA7EA39E6E8185D43BE9C5D8F
 ```
 
 ## Tham khảo Lively chính thức
